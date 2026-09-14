@@ -1,0 +1,146 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage[utf8]{inputenc}
+%\usepackage[spanish]{babel}
+\usepackage{amsmath,amssymb,booktabs}
+\usepackage{hyperref}
+\newcommand{\B}{\mathbf{B}}
+\newcommand{\Lm}{\mathbf{L}}
+\newcommand{\Dm}{\mathbf{D}}
+\newcommand{\X}{\mathbf{X}}
+\title{Localización por asignación de observaciones:\\ qué hace el método, qué falló y qué lo corrige}
+\author{Nota de trabajo}
+\date{14 de septiembre de 2026}
+
+\begin{document}\maketitle
+
+\section{Qué hace el método (esto no cambia)}
+
+Hay $n$ componentes del estado y $p$ observaciones. En cada ciclo:
+
+\begin{enumerate}
+\item Cada componente $i$ elige \emph{una} observación $a(i)$ entre las que tiene cerca.
+\item Su radio de localización es la distancia a esa observación:
+  $r_i = \max\big(1,\ \mathrm{dist}(i, a(i))\big)$.
+  El piso $1$ evita que un componente observado en su propio sitio quede con radio $0$, que
+  dejaría su fila de la precisión diagonal (medido: eso solo cuesta un 25\,\% de error).
+\item Con esos radios se arma la precisión de Cholesky modificado: el componente $i$ se regresa
+  sobre sus predecesores $P(i)$, los vecinos con índice menor a distancia $\le r_i$,
+  \begin{equation}
+    \boldsymbol\beta_i = \big(\X_P^\top\X_P + a_i I\big)^{-1}\X_P^\top\,\Delta\mathbf{x}_i,
+    \qquad a_i = \alpha\,\frac{\operatorname{tr}(\X_P^\top\X_P)}{|P(i)|},
+  \end{equation}
+  y $\Lm_{ii}=1$, $\Lm_{i,P(i)} = -\boldsymbol\beta_i^\top$, $\Dm_{ii} = 1/\mathrm{var(residuo)}$,
+  $\widehat\B^{-1} = \Lm^\top\Dm\Lm$.
+\item El análisis es el global de siempre, con \emph{todas} las observaciones:
+  \begin{equation}
+    \big(\widehat\B^{-1} + \mathbf{H}^\top\mathbf{R}^{-1}\mathbf{H}\big)\,\delta\mathbf{x}
+      = \mathbf{H}^\top\mathbf{R}^{-1}(\mathbf{y}-\mathbf{H}\mathbf{x}^b).
+  \end{equation}
+\end{enumerate}
+
+La asignación decide \emph{radios}, no qué observaciones corrigen a quién. Toda la información
+entra en el paso 4. Lo único que cambia entre versiones del método es el paso 1: la regla con
+la que $i$ elige $a(i)$.
+
+\section{Qué falló: el costo $J$}
+
+La regla original elegía $a(i)$ minimizando el costo variacional de la actualización escalar
+con la observación $j$, con $\sigma_{ij}$ la covarianza del ensamble entre $i$ y el sitio $j$,
+$\sigma_{jj}$ la varianza allí, $r$ el error de observación y $\delta_j = y_j - x^b_j$ la
+innovación:
+\begin{equation}
+  J_i(j) = \frac{(x^a_i - x^b_i)^2}{\sigma_{ii}} + \frac{(y_j - x^a_j)^2}{r}
+  \;=\; \frac{\delta_j^2}{(\sigma_{jj}+r)^2}\left[\frac{\sigma_{ij}^2}{\sigma_{ii}} + r\right].
+  \label{eq:J}
+\end{equation}
+La forma factorizada muestra el problema. El factor $\delta_j^2/(\sigma_{jj}+r)^2$ depende solo del
+sitio $j$, no de $i$. Lo único que depende de $i$ es el corchete, y se minimiza cuando
+$\sigma_{ij}^2$ es \textbf{lo más pequeño posible}: $J$ prefiere, entre las candidatas, la
+observación \emph{menos} correlacionada con $i$, porque es la que menos lo mueve. Ningún término
+premia que $x_i$ mejore; no puede, porque $x_i$ no está observado.
+
+Medido en el QG: la correlación mediana de la observación elegida era $0{,}15$ cuando la
+máxima disponible era $0{,}48$; $J$ elegía la de menor correlación el 44\,\% de las veces. El
+``79\,\% que no toma la más cercana'' era esto: elegían por inercia, no por información.
+
+En el análisis global (paso 4) el daño quedaba escondido, porque las demás observaciones
+compensan un radio mal elegido. Se hizo visible al restringir la actualización a la observación
+asignada: ahí el análisis con $J$ dejaba el error igual que el fondo.
+
+\section{El primer intento de corrección, y por qué tampoco basta}
+
+Lo natural es elegir la observación que más reduce la varianza del error de análisis en $i$:
+\begin{equation}
+  a(i) = \arg\max_j \frac{\sigma_{ij}^2}{\sigma_{jj}+r}.
+  \label{eq:var}
+\end{equation}
+Es el criterio correcto en el modelo lineal-gaussiano y no usa la innovación. Corrige la
+dirección: ahora sí elige las correlacionadas. Pero $\sigma_{ij}$ es la covarianza \emph{cruda}
+del ensamble, y con $N=40$ miembros dos puntos no correlacionados muestran una correlación
+espuria del orden de $1/\sqrt{N}\approx 0{,}16$. Entre muchas candidatas, alguna lejana siempre
+tiene ruido mayor que la señal de la vecina real: los radios salen grandes y ruidosos
+(medio $2{,}9$, máximo $8$) y el análisis pierde contra el radio fijo ($0{,}381$ contra
+$0{,}320$). Es el mismo problema por el que la localización existe.
+
+\section{La corrección que funciona: leer la elección de $\widehat\B^{-1}$}
+
+En lugar de la covarianza cruda, la dependencia \emph{condicional} que el propio Cholesky
+estima. En cada ciclo, antes del paso 1:
+
+\begin{enumerate}
+\item[0.] Armar una precisión de tanteo $\widehat\B^{-1}_{\rho}=\Lm^\top\Dm\Lm$ con un radio
+  ancho $\rho$ igual para todos (sin invertir nada; es rala y sus entradas están disponibles).
+\end{enumerate}
+La entrada $(\widehat\B^{-1}_\rho)_{ij}$ mide cuánto depende $i$ del sitio $j$ \emph{dado todo lo
+demás}. Normalizada es la correlación parcial,
+\begin{equation}
+  \varrho_{ij} = -\frac{(\widehat\B^{-1}_\rho)_{ij}}
+                       {\sqrt{(\widehat\B^{-1}_\rho)_{ii}\,(\widehat\B^{-1}_\rho)_{jj}}},
+  \qquad
+  a(i) = \arg\max_{j \text{ observado}} |\varrho_{ij}|.
+  \label{eq:partial}
+\end{equation}
+Después, pasos 1--4 como siempre: $r_i = \max(1,\mathrm{dist}(i,a(i)))$, se rearma
+$\widehat\B^{-1}$ con esos radios, análisis global.
+
+Por qué esto sí: la regresión con ridge ya descontó lo que los vecinos explican, así que una
+correlación cruda espuria entre $i$ y un punto lejano no sobrevive como dependencia condicional.
+El criterio y el estimador de $\B^{-1}$ son el mismo objeto: se elige el radio de cada fila con
+la información que la propia fila produce.
+
+\paragraph{El radio de tanteo $\rho$ no es libre.} Tiene que ser uno que la regresión aguante
+con $N$ miembros. Con $\rho = 8$ cada fila tiene $\sim 150$ predecesores para $40$ miembros, los
+coeficientes son ruido y todo se cae (radio medio $4{,}8$, error $0{,}68$). Con $\rho=4$ son
+$\sim 40$ predecesores y funciona. Es el único parámetro nuevo, y va atado a $N$.
+
+\section{Los números (QG, $N=40$, retícula de paso 2, 10 ciclos, una semilla)}
+
+Error RMS del análisis en $q$ sobre el interior, unidades normalizadas, media de los ciclos 4--9.
+Todos los brazos con el mismo análisis global EnKF-MC.
+
+\begin{center}\begin{tabular}{@{}lccr@{}}\toprule
+regla de radio & radio medio & radio máx & RMSE \\ \midrule
+fijo $r=1$ & 1 & 1 & 0,322 \\
+fijo $r=2$ (mejor uniforme) & 2 & 2 & 0,320 \\
+fijo $r=4$ & 4 & 4 & 0,468 \\ \midrule
+asignación con $J$ \eqref{eq:J} & 1,49 & 2 & 0,331 \\
+asignación por varianza \eqref{eq:var}, $\kappa=4$, sin piso & 0,94 & 4 & 0,446 \\
+asignación por varianza, candidatas a $\le 8$, piso 1 & 2,90 & 8 & 0,381 \\ \midrule
+\textbf{asignación por correlación parcial \eqref{eq:partial}, $\rho=4$} & 2,01 & 7 & \textbf{0,3135} \\
+\quad idem, $\rho=2$ & 1,23 & 4 & 0,321 \\
+\quad idem, $\rho=8$ & 4,77 & 14 & 0,681 \\ \bottomrule
+\end{tabular}\end{center}
+
+Con $\rho=4$ la asignación queda por delante del mejor radio fijo ($0{,}3135$ contra $0{,}320$,
+un 2\,\%). Es una semilla y diez ciclos: una señal, no un resultado. Es la primera vez que una
+regla de asignación queda por delante del barrido uniforme.
+
+\section{Qué sigue}
+
+El benchmark ya montado en el repositorio (dos filtros, dos redes, $N\in\{40,80,120\}$, tres
+semillas, 60 ciclos), con la regla \eqref{eq:partial} en lugar de $J$, y el radio de tanteo
+$\rho\in\{3,4,5\}$ como eje. Hay que corregir \texttt{FINDINGS.md} y el paper: el hallazgo del
+79\,\% es correcto como dato y falso como interpretación.
+
+\end{document}

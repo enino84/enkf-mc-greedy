@@ -1,0 +1,77 @@
+# qgloc benchmark
+#
+#   docker compose build
+#   SCALE=smoke docker compose run --rm suite          # ~5 min, checks the pipeline
+#   SCALE=paper docker compose up -d suite             # the real thing
+#   docker compose logs -f suite
+#
+# Parallel: the benchmark runs are independent, so split them over shards
+# (each shard is one process; run one per core you can spare):
+#
+#   SCALE=paper docker compose run --rm cache          # climatology once, first
+#   for i in 0 1 2 3; do SHARD_INDEX=$i SHARD_COUNT=4 SCALE=paper \
+#       docker compose up -d shard$i; done   # or use the `shard` service with -p
+#   SCALE=paper docker compose run --rm figures        # after the shards finish
+#
+# results/ and paper/ are bind-mounted; nothing is lost when a container exits.
+
+x-common: &common
+  build: .
+  image: qgloc:latest
+  environment: &env
+    SCALE: ${SCALE:-smoke}
+    RESULTS_DIR: /work/results
+    PYTHONHASHSEED: "0"
+    OMP_NUM_THREADS: "1"
+    OPENBLAS_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+    TANDA: ${TANDA:-}
+  volumes:
+    - ./results:/work/results
+    - ./paper:/work/paper
+
+services:
+
+  suite:                       # EXP-01 + EXP-02 + figures + tables
+    <<: *common
+    container_name: qgloc-suite
+    command: bash /work/scripts/run_all.sh
+
+  cache:                       # only the climatology (spin-up + snapshots)
+    <<: *common
+    command: python -c "import sys; sys.path.insert(0,'/work/experiments'); from common import *; make_testbed(get_scale())"
+
+  single:                      # EXP-01 alone
+    <<: *common
+    command: python /work/experiments/exp01_single_cycle.py
+
+  bench:                       # EXP-02 alone
+    <<: *common
+    command: python /work/experiments/exp02_benchmark.py
+
+  shard:                       # one shard of EXP-02; set SHARD_INDEX/SHARD_COUNT
+    <<: *common
+    environment:
+      <<: *env
+      SHARD_INDEX: ${SHARD_INDEX:-0}
+      SHARD_COUNT: ${SHARD_COUNT:-4}
+    command: python /work/experiments/exp02_benchmark.py
+
+  shard0: { <<: *common, environment: { <<: *env, SHARD_INDEX: "0", SHARD_COUNT: "${SHARD_COUNT:-4}" }, command: python /work/experiments/exp02_benchmark.py }
+  shard1: { <<: *common, environment: { <<: *env, SHARD_INDEX: "1", SHARD_COUNT: "${SHARD_COUNT:-4}" }, command: python /work/experiments/exp02_benchmark.py }
+  shard2: { <<: *common, environment: { <<: *env, SHARD_INDEX: "2", SHARD_COUNT: "${SHARD_COUNT:-4}" }, command: python /work/experiments/exp02_benchmark.py }
+  shard3: { <<: *common, environment: { <<: *env, SHARD_INDEX: "3", SHARD_COUNT: "${SHARD_COUNT:-4}" }, command: python /work/experiments/exp02_benchmark.py }
+
+  figures:                     # rebuild every figure and table from results/
+    <<: *common
+    command: bash /work/scripts/figures.sh
+
+  test:
+    <<: *common
+    command: python -m pytest tests -q
+
+  shell:
+    <<: *common
+    stdin_open: true
+    tty: true
+    command: bash

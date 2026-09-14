@@ -1,0 +1,356 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,
+            urlcolor=blue!50!black}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+
+\newcommand{\xb}{\mathbf{x}^{b}}
+\newcommand{\xa}{\mathbf{x}^{a}}
+\newcommand{\Bmat}{\mathbf{B}}
+\newcommand{\Lmat}{\mathbf{L}}
+\newcommand{\Dmat}{\mathbf{D}}
+\newcommand{\Hmat}{\mathbf{H}}
+\newcommand{\Rmat}{\mathbf{R}}
+
+\title{\textbf{Adaptive localization by observation assignment\\
+for the modified-Cholesky ensemble Kalman filter}}
+
+\author{Working draft}
+\date{\today}
+
+\begin{document}
+\maketitle
+\begin{center}\fbox{\parbox{0.92\linewidth}{\small\textbf{Draft status.} The selection rule of Section~3 (the cost $J$) is superseded: it selects the least correlated candidate (see \texttt{nota\_criterio.tex}). The method now reads each component's radius from the partial correlations of a probe modified-Cholesky precision (\texttt{qgloc/assignment.py}, \texttt{assign\_partial}); the analysis of Section~4 and the benchmark design are unchanged. Sections~3 and~5 are to be rewritten from the tables \texttt{tables\_paper.tex} once EXP-02 has run.}}\end{center}
+
+\begin{abstract}
+\noindent
+Localization in ensemble data assimilation is normally parameterized by a
+radius of influence, tuned once against a known truth and then held fixed. We
+replace the radius by a different object: each model component is updated by
+exactly one observation, chosen from the few that its neighbourhood reaches,
+and the radius is whatever distance that choice implies. The choice is made by
+minimizing a variational cost evaluated at a scalar local analysis, computed
+from ensemble anomalies and observations alone, with no reference trajectory
+and nothing withheld. Because the cost decomposes over components, the optimal
+assignment is obtained exactly, in closed form, at a cost of microseconds per
+evaluation. The resulting radius field adapts to the local observation density
+without any parameter controlling it, and the observation selected is very
+often not the nearest one: on a quasi-geostrophic testbed the second, third and
+fourth candidates are chosen about as often as the first, because what decides
+the choice is the ensemble correlation and not the distance. The assignment
+determines the predecessor sets of a modified-Cholesky precision matrix, which
+is assembled once per cycle and used for a single global analysis.
+\end{abstract}
+
+\section{The parameter nobody can pin down}
+
+The analysis step of an ensemble Kalman filter combines a forecast ensemble
+with observations. With an ensemble far smaller than the state dimension, the
+sample covariance is rank deficient and carries spurious correlations between
+distant variables; localization removes them. Every localization scheme depends
+on a radius of influence, and the radius is normally chosen by sweeping it
+against a known truth in a synthetic experiment and then freezing it.
+
+Attempts to estimate the radius instead run into a difficulty that is not a
+matter of tuning. A radius per model component is a free parameter with nothing
+in the data to pin it down. In experiments preceding this work, on a system of
+40 components, an oracle with full access to the truth reduced the analysis
+error by 59\% on the cycle it optimized, and the same radius field made the
+error 22\% \emph{worse} on the following cycle, performing worse than a random
+shuffle of its own values. What such a search finds is the cycle's noise.
+
+Grouping components reduces the count but introduces a grouping that must
+itself be justified, and the radius within a group remains a free number.
+
+\section{Assignment instead of radius}
+
+We propose a different parameterization. Let the model state have components
+$i = 1, \dots, n$ and let there be $m$ observations at known locations. For each
+component, grow a neighbourhood until it contains $\kappa$ observations; call
+them the \emph{candidates} of $i$ and write $\mathcal{C}(i)$ for the set. The
+component is then updated by exactly one member of $\mathcal{C}(i)$, or by none
+at all.
+
+The decision variable is the assignment
+%
+\begin{equation}
+  a : \{1, \dots, n\} \;\longrightarrow\; \mathcal{C}(i) \cup \{\varnothing\},
+\end{equation}
+%
+and the radius of component $i$ is not chosen: it is the distance to $a(i)$.
+
+Three properties follow immediately.
+
+\paragraph{The radius adapts to the observation density with no parameter.}
+Where observations are dense the neighbourhood stops growing early; where they
+are sparse it grows further. On the testbed below, a regular lattice of spacing
+four gives a mean radius of 2.7 and a maximum of 4, while a random network of
+the same overall density gives a mean of 1.7 and a maximum of 5 --- the second
+number is larger precisely because a random network leaves empty regions. No
+setting controls this.
+
+\paragraph{The nearest observation is not automatically the right one.}
+What determines how much an observation tells us about a component is the
+ensemble correlation between them, not the distance. In a flow with structure,
+two points aligned along a current can be far better correlated than two
+adjacent points across a front. This is why the neighbourhood keeps growing
+past the first observation: the choice is made on the cost, and the cost sees
+the correlation.
+
+\paragraph{Abstaining is a legal choice.}
+If none of the candidates correlates with the component, updating it from any
+of them injects noise, which is what localization exists to prevent. Leaving
+the component at its background value is one of the options, and the cost
+selects it on its own.
+
+\section{The cost}
+
+For component $i$ assigned to observation $j$, the local analysis is the scalar
+Kalman update
+%
+\begin{equation}
+  x^{a}_{i} = x^{b}_{i} + \frac{\sigma_{ij}}{\sigma_{jj} + r_{j}}
+              \big( y_{j} - x^{b}_{j} \big),
+  \label{eq:local}
+\end{equation}
+%
+with $\sigma_{ij}$ the ensemble covariance between component $i$ and the
+observed site of $j$, $\sigma_{jj}$ the ensemble variance there, and $r_{j}$
+the observation error variance. The cost is the variational one evaluated at
+that analysis,
+%
+\begin{equation}
+  J_{i}(a) \;=\;
+  \underbrace{\frac{(x^{a}_{i} - x^{b}_{i})^{2}}{\sigma_{ii}}}_{\text{departure from the background}}
+  \;+\;
+  \underbrace{\frac{(y_{j} - x^{a}_{j})^{2}}{r_{j}}}_{\text{residual}} ,
+  \qquad j = a(i),
+  \label{eq:cost}
+\end{equation}
+%
+and $J_{i} = (y_{j} - x^{b}_{j})^{2} / r_{j}$ when $i$ abstains, since the
+background is kept and the departure term vanishes. The global score is
+%
+\begin{equation}
+  J(a) \;=\; \frac{1}{n}\sum_{i=1}^{n} J_{i}(a).
+  \label{eq:global}
+\end{equation}
+
+No reference trajectory enters \eqref{eq:cost}, and no observation is withheld.
+Everything is a dot product over the $N$ ensemble members. An assignment that
+moves the state a long way without justification pays in the first term; one
+that leaves a residual it could have removed pays in the second.
+
+\begin{proposition}[Exact minimization]
+$J$ decomposes over components, so
+$\arg\min_{a} J(a)$ is obtained by minimizing each $J_{i}$ independently over
+$\mathcal{C}(i) \cup \{\varnothing\}$.
+\end{proposition}
+
+\begin{remark}
+This is worth stating plainly because it removes a whole apparatus. There is no
+search here: the optimal assignment is a per-component $\arg\min$ over
+$\kappa + 1$ precomputed numbers, and it is obtained in one pass over the cost
+table. The decomposition is a property of the cost \eqref{eq:global}, not of
+the implementation.
+\end{remark}
+
+\section{From assignment to analysis}
+
+The assignment determines a radius per component, and therefore the predecessor
+sets of the modified-Cholesky estimator \cite{bickel2008,nino2018}. For each
+component $i$ with predecessors $P(i)$ given by its radius,
+%
+\begin{equation}
+  \boldsymbol{\beta}_{i}
+  = \big(\mathbf{X}_{P}^{\top}\mathbf{X}_{P} + a_{i}\mathbf{I}\big)^{-1}
+    \mathbf{X}_{P}^{\top}\,\Delta\mathbf{X}_{i},
+  \qquad a_{i} = \alpha\,\frac{\operatorname{tr}\big(\mathbf{X}_{P}^{\top}\mathbf{X}_{P}\big)}{|P(i)|},
+  \qquad
+  \Lmat_{ii} = 1, \quad \Lmat_{i,P(i)} = -\boldsymbol{\beta}_{i}^{\top},
+\end{equation}
+%
+with $\Dmat_{ii}$ the inverse residual variance, and
+$\widehat{\Bmat}^{-1} = \Lmat^{\top}\Dmat\Lmat$. The ridge is a fraction
+$\alpha$ of the mean eigenvalue of each row's own Gram matrix rather than an
+absolute constant. This matters here more than in the fixed-radius estimator:
+the assignment produces rows with anywhere from zero to over a hundred
+predecessors in the same cycle, and an absolute penalty would regularize the
+short rows hard and the wide rows not at all. The relative form gives
+$\alpha$ the same meaning in every row, every cycle and every configuration
+compared below; $\alpha = 0.3$ throughout. The analysis solves
+%
+\begin{equation}
+  \big(\widehat{\Bmat}^{-1} + \Hmat^{\top}\Rmat^{-1}\Hmat\big)\,
+  \delta\mathbf{x} = \Hmat^{\top}\Rmat^{-1}\big(\mathbf{y} - \Hmat\xb\big).
+\end{equation}
+%
+The precision is positive definite for any assignment, because it retains the
+form $\Lmat^{\top}\Dmat\Lmat$; truncating an already-formed precision does not
+preserve this, and in a companion measurement produced an indefinite matrix in
+44 of 44 cases tested.
+
+\begin{algorithm}[t]
+\caption{One assimilation cycle}
+\begin{algorithmic}[1]
+\State propagate the ensemble; form anomalies $\Delta\mathbf{X}$
+\State \textbf{for each component} grow its neighbourhood until it holds
+       $\kappa$ observations
+\State precompute $\sigma_{ii}$, $\sigma_{jj}$ and $\sigma_{ij}$ for every
+       candidate pair
+\State \textbf{for each component} take
+       $a(i) = \arg\min J_{i}$ over $\mathcal{C}(i)\cup\{\varnothing\}$
+\State read off the radius of every component from $a$
+\State assemble $\widehat{\Bmat}^{-1}$ once and solve for the analysis
+\end{algorithmic}
+\end{algorithm}
+
+\section{Numerical experiments}
+
+The testbed is the 1.5-layer quasi-geostrophic model of Sakov and
+Oke~\cite{sakov2008},
+%
+\begin{equation}
+  q_t = -\psi_x - \varepsilon J(\psi,q) - A\triangle^{3}\psi + 2\pi\sin(2\pi y),
+  \qquad q = \triangle\psi - F\psi,
+\end{equation}
+%
+on the unit square with $F = 1600$, $\varepsilon = 10^{-5}$ and Dirichlet
+boundaries, at $49 \times 49$ per field. The integration is carried on $q$ and
+$\psi$ is recovered from it at every step, so $\psi$ is diagnostic and only $q$
+is estimated. $q$ vanishes on the Dirichlet boundary for every state, so the
+boundary components are removed from the assimilation altogether, as in
+\cite{sakov2008}: they are not observed, not candidates, not predecessors,
+and not in the error. The estimated state is the $47 \times 47$ interior,
+$n = 2209$. Ensemble members and the truth are drawn from
+snapshots of a long run, following \cite{sakov2008}. The dissipation is ten
+times the model default, which is what gives a stationary regime: at the
+default the norm of $q$ grows by a factor of fourteen between $t=500$ and
+$t=8000$ and there is no climatology to sample.
+
+\subsection{What the assignment does on a forecast}
+
+Everything in this subsection is computed from ensemble anomalies and
+observations before any analysis is performed, so it does not depend on
+which filter follows. Table~\ref{tab:single_cycle} gives, for both
+observation networks and for a climatological ensemble as well as one the
+filter has produced, the cost of each rule and the structure of the
+precision the greedy field induces against a uniform radius of the same
+mean. Three things are stable across seeds, networks and cycles. The cost
+separates the rules by orders of magnitude, and the optimal assignment
+improves on the nearest observation by an order of magnitude. Roughly three
+quarters of the components with a choice do not take their nearest
+observation: the ensemble correlation, not the distance, decides. And a
+third of the observations update no component at all; the ensemble variance
+at those sites is one to two orders of magnitude below the variance at the
+sites that are used, so the assignment is discarding observations where the
+Kalman gain would be near zero anyway (Fig.~\ref{fig:discarded}).
+
+\begin{figure}[t]\centering
+\IfFileExists{../results/figures_paper/radius_fields_lattice_enkf-mc.pdf}{%
+\includegraphics[width=\linewidth]{../results/figures_paper/radius_fields_lattice_enkf-mc.pdf}}{%
+\fbox{\parbox{0.9\linewidth}{\centering\small\texttt{results/figures\_paper/radius\_fields\_lattice\_enkf-mc.pdf} --- run \texttt{make paper}}}}
+\caption{The radius field of each rule inside the cycled EnKF-MC on the
+lattice network, on one colormap, and the uniform field of the same mean as
+the greedy one. Crosses mark observations the greedy assignment does not
+use.}\label{fig:radius}
+\end{figure}
+
+\begin{figure}[t]\centering
+\IfFileExists{../results/figures_paper/tessellation_lattice_enkf-mc.pdf}{%
+\includegraphics[width=\linewidth]{../results/figures_paper/tessellation_lattice_enkf-mc.pdf}}{%
+\fbox{\parbox{0.9\linewidth}{\centering\small\texttt{tessellation\_lattice\_enkf-mc.pdf}}}}
+\caption{Which observation updates each component: the nearest-observation
+tessellation against the optimal assignment, and the components where the
+two differ.}\label{fig:tess}
+\end{figure}
+
+\begin{figure}[t]\centering
+\IfFileExists{../results/figures_paper/discarded_obs_lattice_enkf-mc.png}{%
+\includegraphics[width=\linewidth]{../results/figures_paper/discarded_obs_lattice_enkf-mc.png}}{%
+\fbox{\parbox{0.9\linewidth}{\centering\small\texttt{discarded\_obs\_lattice\_enkf-mc.png}}}}
+\caption{Ensemble spread of $q$ along the run with the observations that
+update nothing marked, and the distribution of ensemble variance at used and
+unused observation sites over all cycles.}\label{fig:discarded}
+\end{figure}
+
+\subsection{The cycled benchmark}
+
+Four rules for the radius field are compared inside two filters: the
+modified-Cholesky EnKF, where the field defines the predecessor sets of
+$\widehat{\Bmat}^{-1}$, and the LETKF, where the same field defines the local
+domain of each component. The uniform radius $r \in \{1, 2, 3, 4, 6, 8\}$ is
+the standard scheme and the baseline; greedy is the method; nearest and
+random are the two controls, one showing what distance alone achieves and
+the other that a spread of radii is not by itself the point. Both filters
+run on two networks of equal count: a lattice of spacing two, which shifts
+by one grid point per cycle, and a random network redrawn every cycle.
+$N = 40$, 60 cycles with the first 15 discarded, observations every 20 time
+units with 5\% noise, inflation 1.15, $\kappa = 4$, three seeds. In the
+EnKF-MC a component that abstains has a diagonal precision row; in the LETKF
+it keeps its background. Divergence --- a forecast the model cannot integrate
+--- is recorded per run and counted, not averaged.
+
+Table~\ref{tab:rmse_main} reports the post-burn-in analysis error of $q$
+over the interior; Table~\ref{tab:assignment} what the assignment did inside
+each filter; Table~\ref{tab:timing} the cost per cycle;
+Table~\ref{tab:sensitivity} the same comparison at $N = 20$, at
+$\alpha = 0.1$, and on a lattice of spacing three, so that neither the
+ensemble size, the regularization nor the density is left as a question. Figure~\ref{fig:rvsr} places the rules against the
+uniform-radius sweep.
+
+\begin{figure}[t]\centering
+\IfFileExists{../results/figures_paper/rmse_vs_radius_main.pdf}{%
+\includegraphics[width=\linewidth]{../results/figures_paper/rmse_vs_radius_main.pdf}}{%
+\fbox{\parbox{0.9\linewidth}{\centering\small\texttt{rmse\_vs\_radius\_main.pdf}}}}
+\caption{Post-burn-in analysis RMSE against the uniform radius (points,
+median and range over seeds), with each assignment rule as a horizontal band
+placed at its mean radius (diamond), for both filters and both networks.}
+\label{fig:rvsr}
+\end{figure}
+
+\IfFileExists{tables_paper.tex}{\input{tables_paper.tex}}{%
+\begin{center}\fbox{\parbox{0.9\linewidth}{\small\texttt{paper/tables\_paper.tex} is written by
+\texttt{figures/make\_tables.py} after \texttt{make paper}; until then the
+tables referenced above are absent.}}\end{center}}
+
+\section{Discussion}
+
+The contribution is a reparameterization. The radius stops being a free number
+and becomes a consequence of a choice among observations that are actually
+present, which is what makes it estimable: a choice among $\kappa+1$
+alternatives is constrained in a way that a positive real number is not.
+
+Because the cost decomposes, the optimum is exact and costs one pass over a
+table of $n(\kappa+1)$ numbers. The whole expense of the method is in
+precomputing that table from ensemble anomalies once per cycle, and in
+assembling the precision from the assignment that results. Nothing is tuned:
+$\kappa$ sets how far a neighbourhood grows before it stops, and every other
+quantity --- the radius of each component, which observations are used and
+which are not --- is read off the assignment.
+
+\begin{thebibliography}{9}
+\bibitem{bickel2008} P.~J. Bickel and E.~Levina.
+  Regularized estimation of large covariance matrices.
+  \emph{The Annals of Statistics}, 36(1):199--227, 2008.
+\bibitem{nino2018} E.~D. Nino-Ruiz, A.~Sandu, and X.~Deng.
+  An ensemble Kalman filter implementation based on modified Cholesky
+  decomposition for inverse covariance matrix estimation.
+  \emph{SIAM Journal on Scientific Computing}, 40(2):A867--A886, 2018.
+\bibitem{sakov2008} P.~Sakov and P.~R. Oke.
+  A deterministic formulation of the ensemble Kalman filter: an alternative to
+  ensemble square root filters. \emph{Tellus A}, 60(2):361--371, 2008.
+\end{thebibliography}
+
+\end{document}

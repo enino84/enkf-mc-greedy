@@ -1,0 +1,6 @@
+pyteda==0.5.0
+numpy>=1.26,<3
+scipy>=1.11
+pandas>=2.0
+matplotlib>=3.7
+pytest>=7.4

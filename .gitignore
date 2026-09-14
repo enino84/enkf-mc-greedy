@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+results/EXP-*/
+results/figures_*/
+results/cache/
+results/*.log
+results/FINDINGS-BENCH_*.md
+paper/tables_*.tex
+paper/*.aux
+paper/*.log
+paper/*.out
