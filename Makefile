@@ -4,7 +4,7 @@ SHARDS ?= 4
 DOCKER_RUN = docker run --rm -e SCALE=$(SCALE) -e PYTHONHASHSEED=0 -e OMP_NUM_THREADS=1 \
 	-v $(PWD)/results:/work/results -v $(PWD)/paper:/work/paper $(IMAGE)
 
-.PHONY: build test smoke quick paper all cache single bench figures shards shell clean clean-cache local-test local-all local-figures pdf
+.PHONY: rescore build test smoke quick paper all cache single bench figures shards shell clean clean-cache local-test local-all local-figures pdf
 
 build:          ; docker build -t $(IMAGE) .
 test:           ; $(DOCKER_RUN) python -m pytest tests -q
@@ -29,3 +29,6 @@ local-test:     ; PYTHONPATH=$(PWD) python3 -m pytest tests -q
 local-all:      ; PYTHONPATH=$(PWD):$(PWD)/experiments MPLBACKEND=Agg SCALE=$(SCALE) bash -c 'cd $(PWD) && python3 experiments/exp01_single_cycle.py $(SCALE) && python3 experiments/exp02_benchmark.py $(SCALE) && $(MAKE) local-figures SCALE=$(SCALE)'
 local-figures:  ; PYTHONPATH=$(PWD):$(PWD)/experiments MPLBACKEND=Agg python3 figures/fig_benchmark.py $(SCALE) && PYTHONPATH=$(PWD):$(PWD)/experiments python3 figures/fig_assignment.py $(SCALE) && PYTHONPATH=$(PWD):$(PWD)/experiments python3 figures/make_tables.py $(SCALE)
 pdf:            ; cd paper && pdflatex -interaction=nonstopmode assignment.tex >/dev/null && pdflatex -interaction=nonstopmode assignment.tex | grep -E "Output|Error" ; rm -f paper/*.aux paper/*.log paper/*.out
+# re-score a finished benchmark with another cycle window, e.g. make rescore SCALE=paper BURN=20
+BURN ?= 15
+rescore:        ; $(DOCKER_RUN) python /work/figures/rescore.py $(SCALE) --burn-in $(BURN) && $(MAKE) figures SCALE=$(SCALE)

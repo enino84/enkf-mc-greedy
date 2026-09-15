@@ -26,7 +26,7 @@ Output: `results/EXP-01_<scale>/<network>/seed<k>/cycle<c>.npz`, `single_cycle.c
 
 | tanda | N | α | stride | filters | arms | networks |
 |---|---|---|---|---|---|---|
-| N<N>_s<stride> | 40 / 80 / 120 | 0.3 | 2 / 3 / 4 | EnKF-MC, LETKF | uniform r ∈ {1,2,3,4,6,8}; partial ρ ∈ {3,4,5} | lattice |
+| N<N>_s<stride> | 40 / 80 / 120 | 0.3 | 2 / 3 / 4 | EnKF-MC, LETKF | uniform r ∈ {1,2,3,4,6,8}; partial ρ ∈ {3,4,5} / {4,5,6} / {4,6,8} by N | lattice |
 | N<N>_d<pct> | 40 / 80 / 120 | 0.3 | 50% / 25% / 10% | EnKF-MC, LETKF | the same | random-fixed, random-moving |
 | oneobs | 40 | 0.3 | 2 | EnKF-MC-masked, EnKF-MC-group, LETKF-only | partial ρ=4; nearest | lattice |
 | legacy | 40 | 0.3 | 2 | EnKF-MC | J-greedy, nearest, random, raw-variance | lattice |
@@ -34,8 +34,9 @@ Output: `results/EXP-01_<scale>/<network>/seed<k>/cycle<c>.npz`, `single_cycle.c
 
 Paper scale: 60 cycles, 15 burn-in, 3 seeds. 9 arms × 2 filters × 3 seeds × 3 N × (3 spacings × 1 lattice + 3 densities
 × 2 random networks) = 1458 runs in the main tandas, plus 42 in the
-diagnostics. Propagation dominates: ≈4 s/cycle at N = 40, ≈8 at 80, ≈12 at
-120; ≈180 h on one core. Use shards: 16 shards ≈ 12 h. To shorten, cut
+diagnostics. At 5 time units per cycle propagation is ≈1.3 s/cycle at N = 40, ≈4 at
+120: about 60 h on one core, ≈8 h on 8 shards (`paper20`, at 20 units, is
+four times that). To shorten, cut
 `rhos` to (4,) or `runs` to 2 in `experiments/common.py`.
 
 Reported: post-burn-in analysis RMSE of q over the interior (median and range

@@ -73,23 +73,22 @@ A finished run is resumable: EXP-02 skips any `run.npz` that already exists.
 
 ## The benchmark (EXP-02)
 
-| filter | arms |
-|---|---|
-| EnKF-MC | uniform r ∈ {1, 2, 3, 4, 6, 8}; greedy; nearest; random |
-| LETKF | the same |
+For N ∈ {40, 80, 120}: tandas `N<N>_s<stride>` with the fixed lattice at
+spacing ∈ {2, 3, 4} (24%, 10%, 5.5% of the interior observed), and tandas
+`N<N>_d<pct>` with the two random networks (fixed for the run; redrawn every
+cycle) observing 50%, 25%, 10% of the interior. Each: EnKF-MC and LETKF ×
+arms {uniform r ∈ {1, 2, 3, 4, 6, 8}, partial ρ} × 3 seeds, with ρ tied to N:
+{3, 4, 5} at N = 40, {4, 5, 6} at 80, {4, 6, 8} at 120.
 
-× two networks (lattice of stride 2, 24% of the interior; random of equal
-count, redrawn per cycle) × seeds. N = 40, α = 0.3, 60 cycles, 15 burn-in, 5% observation
-noise, inflation 1.15, observations every 20 time units. Three checks on the
-lattice/EnKF-MC cell: N = 20; α = 0.1; and a sparse network of stride 3.
-At stride 4 (5.5% observed) no arm reduces the error at N = 40 — measured,
-and the reason the main benchmark is at stride 2.
+α = 0.3, 60 cycles, 15 burn-in, 5% noise, inflation 1.15, observations every
+5 time units (16 model steps; `paper20` is the same suite at 20 units).
+Diagnostics on the lattice at N = 40, stride 2: `oneobs`, `legacy`, `alpha`
+(α = 0.1).
 
-In the EnKF-MC the radius field defines the predecessors of `B^-1`, which is
-what the assignment is designed for. In the LETKF the same field defines the
-local domain; the report says so. A component that abstains has radius 0: in
-the EnKF-MC its precision row is diagonal, in the LETKF it keeps its
-background unless observed at its own point.
+In the EnKF-MC the radius field defines the predecessors of `B⁻¹`. In the
+LETKF the same field defines the local domain; the report says so. Observed
+components take their own site and radius 1 — measured to be right (0.31 vs
+0.47 when they are forced to look elsewhere).
 
 ## What a run leaves on disk
 

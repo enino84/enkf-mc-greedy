@@ -50,7 +50,12 @@ class Scale:
     # partial correlations of a probe precision of radius rho, in both
     # filters. N is an axis; rho is an axis, because it is tied to N.
     radii: tuple = (1, 2, 3, 4, 6, 8)
+    # The probe radius is tied to N: each probe regression has ~rho^2
+    # predecessors and must stay determined. rho = 8 with N = 40 (150
+    # predecessors) collapsed (0.68 vs 0.31 for rho = 4), measured. So the
+    # sweep of rho grows with N; ``rhos`` is the fallback for an N not listed.
     rhos: tuple = (3, 4, 5)
+    rhos_by_N: dict = None
     ensemble_sizes: tuple = (40, 80, 120)
     networks: tuple = ("lattice", "random-fixed", "random-moving")
     ridge_alpha: float = 0.3
@@ -74,12 +79,16 @@ class Scale:
     def seeds(self):
         return [5000 + 17 * i for i in range(self.runs)]
 
+    def rhos_for(self, N):
+        table = self.rhos_by_N or {40: (3, 4, 5), 80: (4, 5, 6), 120: (4, 6, 8)}
+        return tuple(table.get(int(N), self.rhos))
+
     def tandas(self):
         """(name, config overrides, arms, filters, networks)."""
         fixed = [("fixed", r) for r in self.radii]
-        parts = [("partial", r) for r in self.rhos]
         rand = tuple(n for n in self.networks if n != "lattice")
         for N in self.ensemble_sizes:
+            parts = [("partial", r) for r in self.rhos_for(N)]
             if "lattice" in self.networks:
                 for st in self.strides:
                     yield (f"N{N}_s{st}", dict(ensemble_size=N, ridge_alpha=self.ridge_alpha,
@@ -101,14 +110,18 @@ class Scale:
 SCALES = {
     "smoke": Scale(name="smoke", mrefin=5, spinup=2000.0, n_snapshots=30,
                    snapshot_every=100.0, cycles=4, burn_in=1, runs=1,
-                   radii=(1, 2), rhos=(2,), ensemble_sizes=(12,), diag_N=12,
+                   radii=(1, 2), rhos=(2,), rhos_by_N={12: (2,)}, ensemble_sizes=(12,), diag_N=12,
                    diag_rho=2, diag_radii=(1,), legacy_rules=("greedy", "nearest"),
                    obs_stride=3, strides=(3,), densities=(0.1,), snapshot_cycles=(0, 3)),
     "quick": Scale(name="quick", mrefin=5, spinup=8000.0, n_snapshots=80,
                    snapshot_every=200.0, cycles=20, burn_in=5, runs=2,
-                   radii=(1, 2, 4), rhos=(3, 4), ensemble_sizes=(40,), strides=(2, 3),
+                   radii=(1, 2, 4), rhos=(3, 4), rhos_by_N={40: (3, 4)}, ensemble_sizes=(40,), strides=(2, 3),
                    densities=(0.25,), snapshot_cycles=(0, 10, 19)),
-    "paper": Scale(name="paper"),
+    # 5 time units between assimilations = 16 RK4 steps (vs 64 at 20): four
+    # times cheaper to propagate and closer to Sakov & Oke's cadence; the
+    # background error grows about x1.2 per cycle instead of x1.9.
+    "paper": Scale(name="paper", obs_freq=5.0),
+    "paper20": Scale(name="paper20"),          # the 20-unit cadence, for contrast
 }
 
 
