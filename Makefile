@@ -33,3 +33,6 @@ pdf:            ; cd paper && pdflatex -interaction=nonstopmode assignment.tex >
 # re-score a finished benchmark with another cycle window, e.g. make rescore SCALE=paper BURN=20
 BURN ?= 15
 rescore:        ; $(DOCKER_RUN) python /work/figures/rescore.py $(SCALE) --burn-in $(BURN) && $(MAKE) figures SCALE=$(SCALE)
+# EXP-04: steady-state probe; pass options in PROBE, e.g. make exp04 SCALE=paper PROBE="--network random-moving --N 80"
+PROBE ?=
+exp04:          ; docker run -d --name qgloc-exp04 -e SCALE=$(SCALE) -e PYTHONHASHSEED=0 -e OMP_NUM_THREADS=1 -v $(PWD)/results:/work/results -v $(PWD)/paper:/work/paper $(IMAGE) python /work/experiments/exp04_probe.py $(SCALE) $(PROBE)
