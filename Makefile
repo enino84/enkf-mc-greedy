@@ -16,6 +16,7 @@ cache:          ; $(DOCKER_RUN) python -c "import sys; sys.path.insert(0,'/work/
 single:         ; $(DOCKER_RUN) python /work/experiments/exp01_single_cycle.py $(SCALE)
 bench:          ; $(DOCKER_RUN) python /work/experiments/exp02_benchmark.py $(SCALE)
 figures:        ; $(DOCKER_RUN) bash /work/scripts/figures.sh $(SCALE)
+exp03:          ; docker run -d --name qgloc-exp03 -e SCALE=$(SCALE) -e PYTHONHASHSEED=0 -e OMP_NUM_THREADS=1 -v $(PWD)/results:/work/results -v $(PWD)/paper:/work/paper $(IMAGE) python /work/experiments/exp03_flow_probe.py $(SCALE)
 # EXP-02 split over $(SHARDS) background containers (compute the cache first)
 shards:         ; $(MAKE) cache; for i in $$(seq 0 $$(( $(SHARDS) - 1 ))); do \
 	docker run -d --name qgloc-shard$$i -e SCALE=$(SCALE) -e SHARD_INDEX=$$i -e SHARD_COUNT=$(SHARDS) \

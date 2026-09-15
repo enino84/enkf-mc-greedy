@@ -68,12 +68,14 @@ import scipy.sparse as sps
 from scipy.sparse.linalg import spsolve
 
 from .assignment import NONE, assign_cycle, assign_partial
+from .flow import FlowGrid
 from .precision import PrecisionBuilder
 
 FIXED = "fixed"        # arm ("fixed", r): the uniform-radius baseline
 PARTIAL = "partial"    # arm ("partial", rho): the method
 RULES = ("greedy", "nearest", "random", "variance")   # candidate-based rules, kept for diagnosis
 BASELINES = ("enkf-mc", "letkf")                      # take a fixed radius
+FLOW = "flow"          # arm ("flow", None): the precision structure from the flow (enkf-mc-flow)
 METHODS = ("enkf-mc-masked", "enkf-mc-group", "letkf-only")   # take a rule
 
 
@@ -256,6 +258,8 @@ def radius_field(bed, arm, DXq, xbq, obs_idx, y, rng):
     if kind == FIXED:
         rf = np.where(bed.grid.interior, int(r), 0)
         return rf, None
+    if kind == FLOW:
+        return np.where(bed.grid.interior, 1, 0), None      # the structure is built in the analysis
     if kind == PARTIAL:
         out = assign_partial(bed, DXq, obs_idx, rho=r,
                              r_cap=getattr(bed.cfg, "r_cap", None))
@@ -296,11 +300,21 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
         t_assign = time.time() - t0
 
         t0 = time.time()
-        Binv = None; extra = {}
+        Binv = None; extra = {}; rec_flow = {}
         if filt == "enkf-mc":
             Qa, Binv = analysis_enkf_mc(bed, Qn, rf, obs_idx, y, rng, pb=pb)
         elif filt == "letkf":
             Qa = analysis_letkf(bed, Qn, rf, obs_idx, y)
+        elif filt == "enkf-mc-flow":
+            psi = bed.psi_from_q(Xf.mean(axis=1))[bed.blocks["psi"]]
+            fgrid = FlowGrid(bed.grid, psi, cfg.obs_freq, cap=cfg.wake_cap, width=cfg.wake_width, local=cfg.wake_local)
+            pbf = PrecisionBuilder(fgrid, alpha=cfg.ridge_alpha)
+            Qa, Binv = analysis_enkf_mc(bed, Qn, rf, obs_idx, y, rng, pb=pbf)
+            npred = fgrid.n_predecessors()
+            extra["n_pred"] = npred.astype(np.int16)
+            extra["depth"] = fgrid.depth.astype(np.int16)
+            rec_flow = dict(pred_mean=float(npred[bed.grid.interior].mean()), pred_max=int(npred.max()),
+                            wake_mean=float(fgrid.wake_length()[bed.grid.interior].mean()))
         elif filt == "enkf-mc-masked":
             keep = aout["obs_used"].nonzero()[0][::max(1, aout["obs_used"].sum() // 3)][:3] if k in snap else ()
             Qa, Binv, cols = analysis_enkf_mc_masked(bed, Qn, rf, obs_idx, y, aout["assigned_obs"], rng,
@@ -333,6 +347,7 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
                    t_assign=t_assign, t_analysis=t_analysis,
                    r_mean=float(rf[bed.grid.interior].mean()),
                    r_max=int(rf.max()))
+        rec.update(rec_flow)
         rec.update({f"b_{a}": b for a, b in bed.errors(xb, x_true).items()})
         rec.update(bed.errors(xa, x_true))
         if aout is not None:

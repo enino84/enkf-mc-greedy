@@ -45,16 +45,16 @@ def arm_name(arm):
         return f"fixed{int(r)}"
     if kind == "partial":
         return f"partial{int(r)}"
-    return kind
+    return kind          # "flow"
 
 
 def cells_for(scale, only=None):
     cells = []
-    for tanda, over, arms, filters, networks in scale.tandas():
+    for tanda, over, filt_arms, networks in scale.tandas():
         if only and tanda != only:
             continue
         for net in networks:
-            for filt in filters:
+            for filt, arms in filt_arms:
                 for arm in arms:
                     for seed in scale.seeds:
                         cells.append(dict(tanda=tanda, over=over, network=net,

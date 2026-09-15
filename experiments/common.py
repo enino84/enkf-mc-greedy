@@ -59,6 +59,7 @@ class Scale:
     ensemble_sizes: tuple = (40, 80, 120)
     networks: tuple = ("lattice", "random-fixed", "random-moving")
     ridge_alpha: float = 0.3
+    inflation: float = 1.05
     # --- diagnostic tandas, lattice, N = 40 ---------------------------
     # oneobs: the same partial radii, but each component updated by its
     #   assigned observation only (masked / group / letkf-only) -- shows
@@ -83,39 +84,36 @@ class Scale:
         table = self.rhos_by_N or {40: (3, 4, 5), 80: (4, 5, 6), 120: (4, 6, 8)}
         return tuple(table.get(int(N), self.rhos))
 
-    def tandas(self):
-        """(name, config overrides, arms, filters, networks)."""
+    def cells(self, N, over):
+        """The three filters of the benchmark for one (N, network) setting."""
         fixed = [("fixed", r) for r in self.radii]
+        return [("enkf-mc", fixed), ("letkf", fixed), ("enkf-mc-flow", [("flow", None)])]
+
+    def tandas(self):
+        """(name, config overrides, filters-with-arms, networks)."""
         rand = tuple(n for n in self.networks if n != "lattice")
         for N in self.ensemble_sizes:
-            parts = [("partial", r) for r in self.rhos_for(N)]
+            over = dict(ensemble_size=N, ridge_alpha=self.ridge_alpha)
             if "lattice" in self.networks:
                 for st in self.strides:
-                    yield (f"N{N}_s{st}", dict(ensemble_size=N, ridge_alpha=self.ridge_alpha,
-                                               obs_stride=st),
-                           fixed + parts, ("enkf-mc", "letkf"), ("lattice",))
+                    yield (f"N{N}_s{st}", dict(over, obs_stride=st), self.cells(N, over), ("lattice",))
             for dens in self.densities:
-                yield (f"N{N}_d{int(round(100*dens))}",
-                       dict(ensemble_size=N, ridge_alpha=self.ridge_alpha, obs_density=dens),
-                       fixed + parts, ("enkf-mc", "letkf"), rand)
-        dfix = [("fixed", r) for r in self.diag_radii]
-        base = dict(ensemble_size=self.diag_N, ridge_alpha=self.ridge_alpha)
-        yield ("oneobs", base, [("partial", self.diag_rho), ("nearest", None)],
-               ("enkf-mc-masked", "enkf-mc-group", "letkf-only"), ("lattice",))
-        yield ("legacy", base, [(r, None) for r in self.legacy_rules], ("enkf-mc",), ("lattice",))
-        yield ("alpha", dict(ensemble_size=self.diag_N, ridge_alpha=self.check_alpha),
-               dfix + [("partial", self.diag_rho)], ("enkf-mc",), ("lattice",))
+                yield (f"N{N}_d{int(round(100*dens))}", dict(over, obs_density=dens), self.cells(N, over), rand)
+        # sensitivity: the ridge, on the lattice at the smallest N
+        N0 = self.ensemble_sizes[0]
+        yield ("alpha", dict(ensemble_size=N0, ridge_alpha=self.check_alpha),
+               [("enkf-mc", [("fixed", r) for r in self.diag_radii]), ("enkf-mc-flow", [("flow", None)])],
+               ("lattice",))
 
 
 SCALES = {
     "smoke": Scale(name="smoke", mrefin=5, spinup=2000.0, n_snapshots=30,
                    snapshot_every=100.0, cycles=4, burn_in=1, runs=1,
-                   radii=(1, 2), rhos=(2,), rhos_by_N={12: (2,)}, ensemble_sizes=(12,), diag_N=12,
-                   diag_rho=2, diag_radii=(1,), legacy_rules=("greedy", "nearest"),
+                   radii=(1, 2), ensemble_sizes=(12,), diag_N=12, diag_radii=(1,),
                    obs_stride=3, strides=(3,), densities=(0.1,), snapshot_cycles=(0, 3)),
     "quick": Scale(name="quick", mrefin=5, spinup=8000.0, n_snapshots=80,
                    snapshot_every=200.0, cycles=20, burn_in=5, runs=2,
-                   radii=(1, 2, 4), rhos=(3, 4), rhos_by_N={40: (3, 4)}, ensemble_sizes=(40,), strides=(2, 3),
+                   radii=(1, 2, 4), ensemble_sizes=(40,), strides=(2, 3),
                    densities=(0.25,), snapshot_cycles=(0, 10, 19)),
     # 20 time units between assimilations (64 RK4 steps) with inflation 1.15
     # is the validated regime. At 5 units the same inflation blows the spread
@@ -152,7 +150,7 @@ def parse_cli(argv=None):
 
 
 def config_for(scale, **over):
-    cfg = QGConfig(mrefin=scale.mrefin, spinup=scale.spinup,
+    cfg = QGConfig(mrefin=scale.mrefin, spinup=scale.spinup, inflation=scale.inflation,
                    n_snapshots=scale.n_snapshots,
                    snapshot_every=scale.snapshot_every,
                    ensemble_size=scale.diag_N, cycles=scale.cycles,

@@ -38,7 +38,7 @@ import numpy as np
 
 METRIC_KEYS = ("cycle", "diverged", "p_obs", "spread", "t_assign", "t_analysis",
                "r_mean", "r_max", "b_rmse_q", "b_rmse_psi", "rmse_q", "rmse_psi", "rmse_q_raw", "b_rmse_q_raw",
-               "rel_q", "b_rel_q", "rmse", "b_rmse", "J", "frac_not_nearest",
+               "rel_q", "b_rel_q", "rmse", "b_rmse", "J", "frac_not_nearest", "pred_mean", "pred_max", "wake_mean",
                "frac_abstain", "obs_unused")
 
 
@@ -62,6 +62,9 @@ class RunRecorder:
               extra=None, bed=None):
         self.rows.append(rec)
         extra = extra or {}
+        if "n_pred" in extra:
+            self.per_cycle.setdefault("n_pred", []).append(extra["n_pred"])
+            self.per_cycle.setdefault("flow_depth", []).append(extra["depth"])
         if k in self.snap_cycles:
             if "domains" in extra:
                 self.domains[k] = {j: (m.astype(np.int32), D.astype(np.int32))
@@ -98,7 +101,7 @@ class RunRecorder:
         out = {}
         # metrics as a structured array
         keys = [k for k in METRIC_KEYS if any(k in r for r in self.rows)]
-        dt = [(k, "i4" if k in ("cycle", "p_obs", "r_max", "obs_unused") else
+        dt = [(k, "i4" if k in ("cycle", "p_obs", "r_max", "obs_unused", "pred_max") else
                ("?" if k == "diverged" else "f8")) for k in keys]
         m = np.zeros(len(self.rows), dtype=dt)
         for j, r in enumerate(self.rows):

@@ -94,7 +94,7 @@ class QGConfig:
     obs_density: float = 0.25    # fraction of the interior observed by the random networks
     obs_std: float = 0.05        # in normalized units, so 5% of each spread
     obs_freq: float = 20.0       # time between assimilation cycles
-    inflation: float = 1.15
+    inflation: float = 1.05         # 1.15 blows the spread up over 60 cycles on a fixed lattice, measured
     cycles: int = 60
     burn_in: int = 15
     # Modified-Cholesky ridge, as a fraction of the mean eigenvalue of each
@@ -110,6 +110,10 @@ class QGConfig:
     # optional cap on the assigned radii (None: up to 2*rho can occur).
     rho: int = 4
     r_cap: int | None = None
+    # EnKF-MC-flow: wake length cap (grid points of travel) and half-width.
+    wake_cap: float = 8.0
+    wake_width: float = 1.0
+    wake_local: int = 2             # square of this radius added to every wake (2 measured best at N = 40)
 
 
 def build_model(cfg: QGConfig) -> QGModel:
