@@ -12,7 +12,7 @@ LOG="$RESULTS_DIR/run_${SCALE}_shard${SHARD_INDEX:-0}.log"
 cd /work
 
 echo "== qgloc suite  scale=$SCALE  shard=${SHARD_INDEX:-0}/${SHARD_COUNT:-1}  $(date -u +%FT%TZ)" | tee -a "$LOG"
-python experiments/exp01_single_cycle.py "$SCALE" 2>&1 | tee -a "$LOG"
+python experiments/exp05_first_analysis.py "$SCALE" ${E1_ARGS:-} 2>&1 | tee -a "$LOG"
 python experiments/exp02_benchmark.py   "$SCALE" ${TANDA:+--tanda "$TANDA"} 2>&1 | tee -a "$LOG"
 if [ "${SHARD_COUNT:-1}" = "1" ]; then
   python figures/fig_benchmark.py  "$SCALE" 2>&1 | tee -a "$LOG"

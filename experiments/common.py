@@ -41,15 +41,16 @@ class Scale:
     # the benchmark answers.
     obs_stride: int = 2
     strides: tuple = (2, 3, 4)               # lattice spacings
-    densities: tuple = (0.5, 0.25, 0.1)      # fraction observed, random networks
-    cycles: int = 60
-    burn_in: int = 15
+    densities: tuple = (0.25, 0.10, 0.05)   # fraction observed, random networks
+    cycles: int = 120
+    burn_in: int = 60
     runs: int = 3
     # --- the main benchmark -------------------------------------------
     # Baselines: uniform radius in both filters. Method: radii from the
     # partial correlations of a probe precision of radius rho, in both
     # filters. N is an axis; rho is an axis, because it is tied to N.
-    radii: tuple = (1, 2, 3, 4, 6, 8)
+    radii: tuple = (1, 2, 3)
+    obs_var: str = "psi"
     # The probe radius is tied to N: each probe regression has ~rho^2
     # predecessors and must stay determined. rho = 8 with N = 40 (150
     # predecessors) collapsed (0.68 vs 0.31 for rho = 4), measured. So the
@@ -57,7 +58,7 @@ class Scale:
     rhos: tuple = (3, 4, 5)
     rhos_by_N: dict = None
     ensemble_sizes: tuple = (40, 80, 120)
-    networks: tuple = ("lattice", "random-fixed", "random-moving")
+    networks: tuple = ("random-fixed", "random-moving")
     ridge_alpha: float = 0.3
     inflation: float = 1.05
     # --- diagnostic tandas, lattice, N = 40 ---------------------------
@@ -85,43 +86,49 @@ class Scale:
         return tuple(table.get(int(N), self.rhos))
 
     def cells(self, N, over):
-        """The three filters of the benchmark for one (N, network) setting."""
+        """The three filters of the benchmark for one (N, network) setting:
+        LETKF and EnKF-MC with uniform radii, and the EnKF-MC with Bayesian rows."""
         fixed = [("fixed", r) for r in self.radii]
-        return [("enkf-mc", fixed), ("letkf", fixed), ("enkf-mc-flow", [("flow", None)])]
+        return [("letkf", fixed), ("enkf-mc", fixed), ("enkf-mc-bayes", [("bayes", None)])]
 
     def tandas(self):
         """(name, config overrides, filters-with-arms, networks)."""
-        rand = tuple(n for n in self.networks if n != "lattice")
         for N in self.ensemble_sizes:
-            over = dict(ensemble_size=N, ridge_alpha=self.ridge_alpha)
-            if "lattice" in self.networks:
-                for st in self.strides:
-                    yield (f"N{N}_s{st}", dict(over, obs_stride=st), self.cells(N, over), ("lattice",))
+            over = dict(ensemble_size=N, ridge_alpha=self.ridge_alpha, obs_var=self.obs_var)
             for dens in self.densities:
-                yield (f"N{N}_d{int(round(100*dens))}", dict(over, obs_density=dens), self.cells(N, over), rand)
-        # sensitivity: the ridge, on the lattice at the smallest N
+                yield (f"N{N}_d{int(round(100*dens))}", dict(over, obs_density=dens), self.cells(N, over), self.networks)
+        # E3: sensitivity and ablation of the Bayesian rows, random-fixed 10%, smallest N, one seed
         N0 = self.ensemble_sizes[0]
-        yield ("alpha", dict(ensemble_size=N0, ridge_alpha=self.check_alpha),
-               [("enkf-mc", [("fixed", r) for r in self.diag_radii]), ("enkf-mc-flow", [("flow", None)])],
-               ("lattice",))
+        base = dict(ensemble_size=N0, ridge_alpha=self.ridge_alpha, obs_var=self.obs_var, obs_density=0.10)
+        variants = {
+            "tau0": dict(bayes_taper=0.0), "tau0.1": dict(bayes_taper=0.1), "tau0.5": dict(bayes_taper=0.5), "tau1": dict(bayes_taper=1.0),
+            "alpha0.1": dict(ridge_alpha=0.1), "alpha1": dict(ridge_alpha=1.0),
+            "infl1.02": dict(inflation=1.02), "infl1.08": dict(inflation=1.08),
+            "w0_1": dict(bayes_clim_weight=1.0), "w0_10": dict(bayes_clim_weight=10.0),
+            "rho0.5fixed": dict(bayes_rho=0.5, bayes_clim_decay=0.5), "noclim": dict(bayes_clim_weight=1e-9),
+            "nomemory": dict(bayes_rho=0.0, bayes_clim_decay=0.5), "square_only": dict(lasso_c=1e9),
+        }
+        for name, v in variants.items():
+            yield (f"E3_{name}", dict(base, **v), [("enkf-mc-bayes", [("bayes", None)])], ("random-fixed",))
+        yield ("E3_ref", base, [("enkf-mc", [("fixed", 2)]), ("letkf", [("fixed", 1)])], ("random-fixed",))
 
 
 SCALES = {
     "smoke": Scale(name="smoke", mrefin=5, spinup=2000.0, n_snapshots=30,
-                   snapshot_every=100.0, cycles=4, burn_in=1, runs=1,
-                   radii=(1, 2), ensemble_sizes=(12,), diag_N=12, diag_radii=(1,),
-                   obs_stride=3, strides=(3,), densities=(0.1,), snapshot_cycles=(0, 3)),
+                   snapshot_every=100.0, cycles=3, burn_in=1, runs=1,
+                   radii=(1,), ensemble_sizes=(12,), diag_N=12, diag_radii=(1,),
+                   densities=(0.1,), networks=("random-fixed",), snapshot_cycles=(0, 2)),
     "quick": Scale(name="quick", mrefin=5, spinup=8000.0, n_snapshots=80,
                    snapshot_every=200.0, cycles=20, burn_in=5, runs=2,
-                   radii=(1, 2, 4), ensemble_sizes=(40,), strides=(2, 3),
-                   densities=(0.25,), snapshot_cycles=(0, 10, 19)),
+                   radii=(1, 2), ensemble_sizes=(40,), densities=(0.10,),
+                   snapshot_cycles=(0, 10, 19)),
     # 20 time units between assimilations (64 RK4 steps) with inflation 1.15
     # is the validated regime. At 5 units the same inflation blows the spread
     # up (0.37 -> 1.56 in 16 cycles, RMSE > 2), and at 1.05 it converges
     # slower than the 20-unit run over the same model time -- measured.
     # First pass: N in {40, 80}, two seeds (~20 h on 4 shards). N = 120 and
     # the third seed are "paper_full"; finished runs are never repeated.
-    "paper": Scale(name="paper", ensemble_sizes=(40, 80), runs=2),
+    "paper": Scale(name="paper", ensemble_sizes=(40, 80), runs=3),
     "paper_full": Scale(name="paper_full"),
 }
 
@@ -156,7 +163,7 @@ def config_for(scale, **over):
                    ensemble_size=scale.diag_N, cycles=scale.cycles,
                    burn_in=scale.burn_in, obs_freq=scale.obs_freq,
                    obs_stride=scale.obs_stride, ridge_alpha=scale.ridge_alpha,
-                   kappa=scale.kappa, r_max=scale.r_max, rho=scale.diag_rho)
+                   kappa=scale.kappa, r_max=scale.r_max, rho=scale.diag_rho, obs_var=scale.obs_var)
     for k, v in over.items():
         setattr(cfg, k, v)
     return cfg

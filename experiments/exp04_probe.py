@@ -38,6 +38,10 @@ def parse_arm(a):
         return "letkf", ("fixed", int(a[5:])), {}
     if a.startswith("lagged"):
         return "enkf-mc-lagged", ("lagged", None), dict(lag_c=float(a[6:]))
+    if a.startswith("climstart"):          # climstartN: climate prior for N cycles, then uniform r=2
+        return "enkf-mc-climstart", ("climstart", None), dict(climstart_cycles=int(a[9:] or 1), lasso_window=6, lasso_c=0.5)
+    if a == "clim":                          # climate structure, ridge toward zero, all cycles
+        return "enkf-mc-clim", ("clim", None), dict(lasso_window=6, lasso_c=0.5)
     raise ValueError(a)
 
 
@@ -45,13 +49,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("scale", nargs="?", default=None)
     ap.add_argument("--network", default="random-fixed")
-    ap.add_argument("--density", type=float, default=0.25)
+    ap.add_argument("--density", type=float, default=0.10)
     ap.add_argument("--stride", type=int, default=2)
     ap.add_argument("--N", type=int, default=40)
     ap.add_argument("--cycles", type=int, default=120)
     ap.add_argument("--burn-in", type=int, default=60)
     ap.add_argument("--seeds", default="5000,5017")
-    ap.add_argument("--arms", default="fixed1,fixed2,fixed3,lagged3")
+    ap.add_argument("--arms", default="fixed1,fixed2,climstart1,climstart2,clim")
     ap.add_argument("--inflation", type=float, default=None)
     ap.add_argument("--obs-freq", type=float, default=None)
     ap.add_argument("--tag", default=None)
@@ -72,7 +76,7 @@ def main():
         for filt, arm, o in arms:
             bed = make_testbed(scale, obs_network=a.network, **over, **o)
             X0, xt0 = bed.build_ensemble(seed)
-            name = f"{arm[0]}{arm[1] if arm[1] else ''}" + (f"_c{o['lag_c']:g}" if o else "") + ("" if filt != "letkf" else "_letkf")
+            name = f"{arm[0]}{arm[1] if arm[1] else ''}" + (f"_c{o['lag_c']:g}" if 'lag_c' in o else "") + (f"_{o['climstart_cycles']}cyc" if 'climstart_cycles' in o else "") + ("" if filt != "letkf" else "_letkf")
             out = ctx.path(tag, name, f"seed{seed}", "run.npz")
             if os.path.exists(out):
                 z = np.load(out, allow_pickle=True); rr = pd.DataFrame(z["metrics"]).to_dict("records")

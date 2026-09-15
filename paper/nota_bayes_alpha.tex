@@ -1,0 +1,146 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,booktabs}
+\usepackage{hyperref}
+\newcommand{\bb}{\boldsymbol\beta}
+\newcommand{\X}{\mathbf{X}}
+\newcommand{\y}{\mathbf{y}}
+\newcommand{\I}{\mathbf{I}}
+\newcommand{\B}{\mathbf{B}}
+\newcommand{\Lm}{\mathbf{L}}
+\newcommand{\Dm}{\mathbf{D}}
+\newcommand{\tr}{\operatorname{tr}}
+\title{Filas bayesianas del Cholesky modificado con prior climatológico:\\ formulación y calibración de $\alpha$}
+\author{Nota de trabajo}
+\date{15 de septiembre de 2026}
+
+\begin{document}\maketitle
+
+\section{La fila como regresión bayesiana}
+
+En el Cholesky modificado, el componente $i$ se regresa sobre sus predecesores $P(i)$
+usando las $N$ anomalías del ensamble de pronóstico. Con $\y\in\mathbb{R}^N$ las anomalías
+de $i$ y $\X\in\mathbb{R}^{N\times p}$ las de sus $p$ predecesores,
+\begin{equation}
+  \y = \X\bb + \boldsymbol\varepsilon, \qquad \boldsymbol\varepsilon\sim\mathcal N(0,\sigma^2\I).
+  \label{eq:model}
+\end{equation}
+La fila $i$ de $\Lm$ es $-\bb^\top$ en las columnas $P(i)$ y $\Dm_{ii}=1/\sigma^2$, y
+$\widehat\B^{-1}=\Lm^\top\Dm\Lm$.
+
+\paragraph{Prior.} Se dispone de $M$ estados de la climatología del modelo (anomalías
+$\mathbf A$). La misma regresión sobre ellos da coeficientes climatológicos
+$\bb_c$, y la incertidumbre a priori sobre $\bb$ se modela como
+\begin{equation}
+  \bb \sim \mathcal N\!\big(\bb_c,\; \tfrac{\sigma^2}{a}\,\I\big).
+  \label{eq:prior}
+\end{equation}
+\paragraph{Posterior.} Con verosimilitud gaussiana el posterior es gaussiano y su media es
+\begin{equation}
+  \widehat\bb = \bb_c + (\X^\top\X + a\I)^{-1}\X^\top(\y - \X\bb_c)
+             = (\X^\top\X + a\I)^{-1}\big(\X^\top\y + a\,\bb_c\big),
+  \label{eq:post}
+\end{equation}
+que es el ridge \emph{hacia} $\bb_c$. Con $\bb_c=0$ se recupera el ridge ordinario. El
+parámetro $a$ es la precisión relativa del prior respecto del ruido; se escribe en forma
+adimensional como
+\begin{equation}
+  a = \alpha\,\frac{\tr(\X^\top\X)}{p},
+  \label{eq:alpha}
+\end{equation}
+de modo que $\alpha$ tiene el mismo significado en toda fila y en todo ciclo.
+
+\paragraph{Lo medido.} En el primer análisis (ensamble climatológico, $N=40$), con la
+estructura de predecesores leída del clima por lasso, el ridge hacia $\bb_c$ da un error
+$6$--$9\%$ menor que el mejor radio uniforme, y mejora monótonamente al crecer $\alpha$
+hasta $10$. En el ciclado convergido, cualquier $\alpha$ grande estorba: el error de
+fondo deja de parecerse al clima y el prior sesga. Por eso $\alpha$ no puede ser una
+constante: hay que calibrarla con lo que el filtro tiene a mano en cada ciclo.
+
+\section{Tres maneras de calibrar $\alpha$}
+
+\subsection{Validación cruzada (lo que no funciona)}
+Elegir $a$ minimizando el error de predicción dejando un miembro fuera tiene forma
+cerrada: con $\mathbf r=\y-\X\bb_c$ y $\X=\mathbf U\mathbf S\mathbf V^\top$,
+\begin{equation}
+  \mathrm{LOO}(a)=\frac1N\sum_{k=1}^N\left(\frac{r_k - \hat r_k(a)}{1-h_{kk}(a)}\right)^2,
+  \qquad h_{kk}(a)=\sum_j U_{kj}^2\frac{s_j^2}{s_j^2+a}.
+\end{equation}
+Medido: elige $\alpha=3$ en el primer ciclo (correcto) y $\alpha=0.1$ después, y el filtro
+diverge. La razón: el $a$ óptimo para \emph{predecir anomalías} subestima el $a$ óptimo para
+la \emph{precisión}. Un $\bb$ que ajusta bien el ensamble da $\sigma^2$ pequeño, $\Dm_{ii}$
+grande, $\widehat\B^{-1}$ sobreconfiada, y el análisis deja de escuchar a las observaciones:
+el spread se colapsa. El criterio de predicción no ve ese daño. Queda descartado.
+
+\subsection{Verosimilitud marginal (bayes empírico)}
+Integrando $\bb$ en \eqref{eq:model}--\eqref{eq:prior}, la verosimilitud marginal de la fila es
+\begin{equation}
+  p(\y\mid a,\sigma^2) = \mathcal N\!\Big(\y;\ \X\bb_c,\ \sigma^2\big(\I + \tfrac1a\X\X^\top\big)\Big),
+\end{equation}
+y con la SVD de $\X$ su logaritmo es
+\begin{equation}
+  \log p(\y\mid a,\sigma^2) = -\frac{N}{2}\log\sigma^2
+   -\frac12\sum_{j=1}^{p}\log\Big(1+\frac{s_j^2}{a}\Big)
+   -\frac{1}{2\sigma^2}\Big[\|\mathbf r\|^2 - \sum_{j=1}^{p}\frac{s_j^2}{s_j^2+a}\,(\mathbf u_j^\top\mathbf r)^2\Big] + \text{cte}.
+  \label{eq:evidence}
+\end{equation}
+Maximizar \eqref{eq:evidence} en $(a,\sigma^2)$ es el bayes empírico de tipo II. Tiene un
+punto fijo cerrado (MacKay):
+\begin{equation}
+  \gamma(a)=\sum_j\frac{s_j^2}{s_j^2+a},\qquad
+  a \leftarrow \frac{\gamma(a)\,\sigma^2}{\|\widehat\bb-\bb_c\|^2},\qquad
+  \sigma^2 \leftarrow \frac{\|\y-\X\widehat\bb\|^2}{N-\gamma(a)},
+  \label{eq:mackay}
+\end{equation}
+donde $\gamma$ es el número efectivo de coeficientes que los datos determinan. La
+interpretación es la que buscamos: $a$ es grande cuando $\widehat\bb$ no se aparta de $\bb_c$
+(el ensamble no contradice el clima), y pequeño cuando sí. A diferencia de la validación
+cruzada, la evidencia penaliza la complejidad ($\log(1+s_j^2/a)$) y no premia ajustar ruido.
+Es la calibración natural y no la hemos probado.
+
+\subsection{Consistencia con la dispersión del ensamble (lo que el filtro ve)}
+El daño de un $\alpha$ mal calibrado se manifiesta en una sola cantidad: la relación entre
+la dispersión del ensamble y el error. La precisión $\widehat\B^{-1}(\alpha)$ implica una
+varianza de fondo; el ensamble tiene la suya; y las innovaciones
+$\mathbf d=\y_{\rm obs}-\mathbf H\mathbf x^b$ tienen una covarianza esperada
+\begin{equation}
+  \mathbb E[\mathbf d\mathbf d^\top] = \mathbf H\B\mathbf H^\top + \mathbf R.
+  \label{eq:desroziers}
+\end{equation}
+Con $\B(\alpha)=\widehat\B^{-1}(\alpha)^{-1}$, se elige el $\alpha$ para el que
+$\tr(\mathbf H\B(\alpha)\mathbf H^\top)$ iguala a $\|\mathbf d\|^2-\tr(\mathbf R)$, o su
+versión por sitios (Desroziers). Esto calibra $\alpha$ con datos que el filtro sí tiene, y
+apunta directamente al defecto que la validación cruzada no veía: si $\widehat\B^{-1}$ es
+sobreconfiada, $\tr(\mathbf H\B\mathbf H^\top)$ sale menor que lo que las innovaciones
+dicen, y $\alpha$ sube. Cuesta una solución rala por valor de $\alpha$ probado (o una
+estimación estocástica de la traza), y es global, no por fila; se puede usar como
+$\alpha$ común y dejar que \eqref{eq:mackay} distribuya por fila alrededor de él.
+
+\section{Extensión secuencial}
+El posterior de un ciclo es el prior del siguiente. Con estadísticos suficientes en escala
+de correlación (para que ciclos con distinto spread pesen igual),
+\begin{equation}
+  \mathbf G_t = \rho\,\mathbf G_{t-1} + \tfrac1N\X_t^\top\X_t,\qquad
+  \mathbf b_t = \rho\,\mathbf b_{t-1} + \tfrac1N\X_t^\top\y_t,\qquad
+  \widehat\bb_t = (\mathbf G_t + a\I)^{-1}\mathbf b_t,
+\end{equation}
+con $\mathbf G_0,\mathbf b_0$ del clima y $\rho\in[0,1)$ el olvido. Medido: $\rho=0.8$
+retrasa durante la convergencia (el error cambia más rápido que la memoria) y estorba;
+$\rho=0.4$ iguala al uniforme con spread algo menor. La memoria compra $N$ efectivo y
+sirve cuando la estructura es estacionaria; el mismo criterio de consistencia de
+\S2.3 sirve para elegir $\rho$: la memoria correcta es la que deja las innovaciones
+consistentes.
+
+\section{Qué se prueba primero}
+\begin{enumerate}
+\item $\alpha$ por bayes empírico \eqref{eq:mackay}, por fila, con $\bb_c$ del clima:
+  primer análisis y ciclado en la retícula ($N=40$, 36 ciclos, contra $0.11$ del uniforme).
+\item Si sobreajusta como la validación cruzada, $\alpha$ global por consistencia de
+  innovaciones \eqref{eq:desroziers} en una malla de valores, y \eqref{eq:mackay} solo para
+  repartir entre filas.
+\item Con el $\alpha$ que salga, la memoria $\rho$ en estado estacionario, con la inflación
+  reajustada un punto.
+\end{enumerate}
+Todo lo anterior son 200 segundos por corrida en la infraestructura actual.
+\end{document}

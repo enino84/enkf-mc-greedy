@@ -33,7 +33,7 @@ COPY experiments /work/experiments
 COPY figures /work/figures
 COPY scripts /work/scripts
 COPY tests /work/tests
-COPY paper/assignment.tex paper/nota_criterio.tex /work/paper/
+COPY paper/assignment.tex paper/nota_criterio.tex paper/nota_bayes_alpha.tex /work/paper/
 COPY README.md EXPERIMENTS.md FINDINGS.md Makefile setup.py /work/
 
 RUN mkdir -p /work/results/cache && chmod +x /work/scripts/*.sh \

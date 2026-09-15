@@ -71,24 +71,25 @@ Without docker: `make local-test`, `make local-all SCALE=smoke`.
 
 A finished run is resumable: EXP-02 skips any `run.npz` that already exists.
 
-## The benchmark (EXP-02)
+## The experiments
 
-For N ∈ {40, 80, 120}: tandas `N<N>_s<stride>` with the fixed lattice at
-spacing ∈ {2, 3, 4} (24%, 10%, 5.5% of the interior observed), and tandas
-`N<N>_d<pct>` with the two random networks (fixed for the run; redrawn every
-cycle) observing 50%, 25%, 10% of the interior. Each: EnKF-MC and LETKF ×
-arms {uniform r ∈ {1, 2, 3, 4, 6, 8}, partial ρ} × 3 seeds, with ρ tied to N:
-{3, 4, 5} at N = 40, {4, 5, 6} at 80, {4, 6, 8} at 120.
+**E1 — first analysis (`exp05_first_analysis.py`)**: one forecast per seed from
+the climatology; uniform radii with ridge→0 and with the climatological prior,
+the climate lasso structure, LETKF, and the dense climatological covariance as
+an oracle; densities 1–40%, N ∈ {20, 40, 80}, ψ and q observed, 20 seeds.
 
-α = 0.3, 60 cycles, 15 burn-in, 5% noise, inflation 1.15, observations every
-5 time units (16 model steps; `paper20` is the same suite at 20 units).
-Diagnostics on the lattice at N = 40, stride 2: `oneobs`, `legacy`, `alpha`
-(α = 0.1).
+**E2 — cycled (`exp02_benchmark.py`, tandas `N<N>_d<pct>`)**: random networks
+(fixed for the run, and redrawn every cycle) observing 25, 10, 5% of the
+interior; ψ observed; N ∈ {40, 80}; LETKF r ∈ {1,2,3}, EnKF-MC r ∈ {1,2,3},
+EnKF-MC with Bayesian rows; 120 cycles, 60 burn-in, 3 seeds.
 
-In the EnKF-MC the radius field defines the predecessors of `B⁻¹`. In the
-LETKF the same field defines the local domain; the report says so. Observed
-components take their own site and radius 1 — measured to be right (0.31 vs
-0.47 when they are forced to look elsewhere).
+**E3 — sensitivity and ablation (tandas `E3_*`)**: taper, α, inflation, w₀,
+fixed ρ, no climate, no memory, square-only structure; random-fixed 10%,
+N = 40, one seed.
+
+The method: `qgloc/bayes_rows.py` (sequential Bayesian rows: climate prior,
+ρ and climate weight by marginal likelihood, tapered ridge) on the structure
+`climate lasso ∪ square r=2` (`qgloc/clim_struct.py`).
 
 ## What a run leaves on disk
 

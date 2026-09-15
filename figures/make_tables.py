@@ -47,7 +47,7 @@ def rmse_table(s, tanda):
     s = s[s.tanda == tanda]
     nets = sorted(s.network.unique()); filts = [f for f in ("enkf-mc", "letkf") if f in set(s.filt)]
     arms = _arms(s.arm.unique())
-    head = "arm & " + " & ".join(f"{net} / {FILT_LABEL[f]}" for net in nets for f in filts) + " \\\\\\midrule\n"
+    head = "arm & " + " & ".join(f"{net} / {FILT_LABEL.get(f, f)}" for net in nets for f in filts) + " \\\\\\midrule\n"
     rows = []
     for a in arms:
         cells = []
@@ -81,7 +81,7 @@ def assignment_table(s):
                 r = s[(s.network == net) & (s.filt == f) & (s.arm == a)]
                 if r.empty:
                     continue
-                rows.append(f"{net} / {FILT_LABEL[f]} & {label_arm(a)} (N={int(r.N.min())}--{int(r.N.max())}) & -- & {med_range(r.r_mean, 2)} & "
+                rows.append(f"{net} / {FILT_LABEL.get(f, f)} & {label_arm(a)} (N={int(r.N.min())}--{int(r.N.max())}) & -- & {med_range(r.r_mean, 2)} & "
                             f"-- & {med_range(100*r.frac_not_nearest, 0)}\\% & {med_range(100*r.frac_abstain, 1)}\\% & {med_range(r.obs_unused, 1)} \\\\")
     body = head + "\n".join(rows) + "\n"
     return tex_table(body, "The assignment inside the cycled filter, post-burn-in means, median [min, max] over seeds. "
@@ -98,7 +98,7 @@ def timing_table(s):
         sub = s[s.filt == f]
         for a in _arms(sub.arm.unique()):
             r = sub[sub.arm == a]
-            rows.append(f"{FILT_LABEL[f]} & {label_arm(a)} & {fmt(r.t_assign.median(), 3)} & {fmt(r.t_analysis.median(), 3)} \\\\")
+            rows.append(f"{FILT_LABEL.get(f, f)} & {label_arm(a)} & {fmt(r.t_assign.median(), 3)} & {fmt(r.t_analysis.median(), 3)} \\\\")
     return tex_table(head + "\n".join(rows) + "\n", "Wall time per cycle of the assignment and of the analysis, medians over runs and cycles.",
                      "tab:timing", "llrr")
 
@@ -134,12 +134,12 @@ def oneobs_table(s):
     for f in ("enkf-mc", "letkf"):
         fx = g[(g.filt == f) & (g.kind == "fixed")].groupby("radius")["rmse"].median()
         if len(fx):
-            rows.append(f"{FILT_LABEL[f]}, global, all observations & uniform $r={int(fx.idxmin())}$ (best) & {fmt(fx.min())} \\\\")
+            rows.append(f"{FILT_LABEL.get(f, f)}, global, all observations & uniform $r={int(fx.idxmin())}$ (best) & {fmt(fx.min())} \\\\")
         for a in method_arms(g[g.filt == f].arm.unique()):
-            rows.append(f"{FILT_LABEL[f]}, global, all observations & {label_arm(a)} & {med_range(g[(g.filt == f) & (g.arm == a)].rmse)} \\\\")
+            rows.append(f"{FILT_LABEL.get(f, f)}, global, all observations & {label_arm(a)} & {med_range(g[(g.filt == f) & (g.arm == a)].rmse)} \\\\")
     for f in ("enkf-mc-masked", "enkf-mc-group", "letkf-only"):
         for a in _arms(d[d.filt == f].arm.unique()):
-            rows.append(f"{FILT_LABEL[f]}, one observation per component & {label_arm(a)} & {med_range(d[(d.filt == f) & (d.arm == a)].rmse)} \\\\")
+            rows.append(f"{FILT_LABEL.get(f, f)}, one observation per component & {label_arm(a)} & {med_range(d[(d.filt == f) & (d.arm == a)].rmse)} \\\\")
     return tex_table(head + "\n".join(rows) + "\n", f"The same radii, two updates: the global analysis with every observation, and each component "
                      f"updated by its assigned observation only (lattice, $N={N}$). Assignment chooses radii, not observations.",
                      "tab:oneobs", "llr")
@@ -204,7 +204,7 @@ def findings_md(scale, s, d1):
                 fx = sub[sub.kind == "fixed"].groupby("radius")["rmse"].median()
                 if fx.empty:
                     continue
-                line = f"- **{net} / {FILT_LABEL[f]}**: best uniform r={int(fx.idxmin())} at {fx.min():.4f}"
+                line = f"- **{net} / {FILT_LABEL.get(f, f)}**: best uniform r={int(fx.idxmin())} at {fx.min():.4f}"
                 for a in method_arms(sub.arm.unique()):
                     r = sub[sub.arm == a]; v = r.rmse.median(); dv = int(r.diverged.astype(bool).sum())
                     line += f"; {a} {v:.4f} ({100*(1-v/fx.min()):+.1f}%, mean radius {r.r_mean.median():.2f}, {100*r.frac_not_nearest.median():.0f}% not nearest" + (f", {dv} diverged" if dv else "") + ")"
@@ -220,7 +220,7 @@ def findings_md(scale, s, d1):
             fx = ff[ff.kind == "fixed"].groupby("radius")["rmse"].median()
             parts = [f"uniform r={int(fx.idxmin())} {fx.min():.4f}"] if len(fx) else []
             parts += [f"{a} {ff[ff.arm == a].rmse.median():.4f}" for a in method_arms(ff.arm.unique()) + rule_arms(ff.arm.unique())]
-            L.append(f"- {FILT_LABEL[f]}: " + "; ".join(parts))
+            L.append(f"- {FILT_LABEL.get(f, f)}: " + "; ".join(parts))
         L.append("")
     dv = s[s.diverged.astype(bool)]
     L += ["## Divergence", "", "None." if dv.empty else "\n".join(f"- {r.tanda}/{r.network}/{r.filt}/{r.arm}/seed{r.seed}: cycle {int(r.diverged_at)}" for r in dv.itertuples()), ""]

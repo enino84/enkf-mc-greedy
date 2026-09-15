@@ -1,0 +1,259 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,graphicx,xcolor,hyperref}
+\newcommand{\bb}{\boldsymbol\beta}
+\newcommand{\X}{\mathbf{X}}
+\newcommand{\y}{\mathbf{y}}
+\newcommand{\I}{\mathbf{I}}
+\newcommand{\B}{\mathbf{B}}
+\newcommand{\Lm}{\mathbf{L}}
+\newcommand{\Dm}{\mathbf{D}}
+\newcommand{\G}{\mathbf{G}}
+\newcommand{\bv}{\mathbf{b}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\fig}[2]{\IfFileExists{#1}{\includegraphics[width=#2\linewidth]{#1}}{\fbox{\parbox{0.9\linewidth}{\centering\small\texttt{#1}}}}}
+\newtheorem{remark}{Remark}
+
+\title{Bayesian rows for the modified-Cholesky EnKF:\\ climatological priors and adaptive memory in the precision estimate}
+\author{}
+\date{Draft, 15 September 2026}
+
+\begin{document}\maketitle
+
+\begin{abstract}
+The modified-Cholesky ensemble Kalman filter (EnKF-MC) estimates the background
+precision $\B^{-1}=\Lm^\top\Dm\Lm$ one row at a time, each row being a regression of a
+state component on its predecessors within a localization radius, fitted to the $N$
+ensemble anomalies with a ridge penalty. We treat each row as a Bayesian regression and
+change two things about its prior. First, the prior mean is not zero: at the start of a
+cycled experiment it is the coefficient vector of the same regression fitted to a
+climatology of the model, and from the second cycle on it is the previous cycle's
+posterior. Second, the prior weights are not fixed: the forgetting factor of the
+sequential posterior and the weight of the climatological term are chosen for every row
+and every cycle by maximising the marginal likelihood of the new ensemble anomalies.
+The result is a precision whose coefficients are estimated from an effective sample far
+larger than $N$ where the forecast error is stationary, and from the current ensemble
+alone where it changes. On the quasi-geostrophic testbed of Sakov and Oke with $N=40$
+members, the Bayesian rows reduce the analysis error of the plain EnKF-MC at every
+cycle of a 36-cycle run (by 5--20\%), reduce the error of the first analysis from a
+climatological ensemble by 6--9\% at every observation density between 1\% and 40\%,
+and end four times below the best LETKF. The hyperparameters selected by the evidence
+have a transparent physical reading: the climatology is used over the jet and released
+after one analysis; memory is kept where the flow is quiescent and dropped along the
+jet. We also report, with the same care, what does not work: five ways of choosing
+\emph{which} predecessors a row uses, from the ensemble, from the dynamics or from the
+climatology, none of which beats a uniform radius once the filter has converged; the
+gain is in the values of the rows and in how much data they see, not in their sparsity
+pattern.
+\end{abstract}
+
+\section{Introduction}
+
+Localization in ensemble Kalman filters exists because $N$ members cannot estimate an
+$n\times n$ covariance. The modified-Cholesky EnKF (EnKF-MC) of Nino-Ruiz and
+co-workers localizes in the precision: component $i$ is regressed on its predecessors
+$P(i)$, the components with a lower index within a radius $r$, and the regression
+coefficients fill row $i$ of a unit lower-triangular $\Lm$. With a ridge penalty, the
+row is a well-posed problem even when $|P(i)|>N$, the precision is sparse, and the
+analysis is a sparse linear solve. The radius is the localization parameter; it is
+chosen by a sweep, and Bickel and Levina's theory of banded Cholesky estimators says
+why a small radius is right when $N$ is small: the bandwidth balances the bias of
+truncating the true dependence against the variance of estimating it from $N$ samples.
+
+This paper does not change the sparsity pattern. It changes what the rows are fitted
+to. Two observations motivate it. The first is that the ridge penalty of a row is a
+Gaussian prior on its coefficients, centred at zero; nothing forces the centre to be
+zero, and at the first analysis of a cycled experiment, when the ensemble is a sample
+of the model's climatology, the coefficients of the same regression fitted to that
+climatology are the correct prior mean. The second is that the forecast error at one
+cycle resembles the forecast error at the previous one, so the previous row is a
+useful prior for the current one; how useful depends on how fast the error is changing,
+which differs from place to place and can be read from the data. Both observations
+lead to the same construction: a sequential Bayesian regression per row, whose
+hyperparameters -- a forgetting factor and a climatological weight -- are chosen by
+the marginal likelihood of the new anomalies.
+
+Section~\ref{sec:method} gives the method. Section~\ref{sec:setup} the testbed.
+Section~\ref{sec:results} the results: first analysis, cycled runs, comparison with
+the LETKF, and the maps of what the evidence decides. Section~\ref{sec:negative}
+reports the structural alternatives that were tried and why they lose.
+Section~\ref{sec:discussion} discusses limits and what is left to establish.
+
+\section{Method}\label{sec:method}
+
+\subsection{The modified-Cholesky row as a regression}
+Let $\Delta\X\in\mathbb{R}^{n\times N}$ be the forecast anomalies. For component $i$
+with predecessors $P(i)$ ($p=|P(i)|$), write $\y\in\mathbb{R}^N$ for its anomalies and
+$\X\in\mathbb{R}^{N\times p}$ for those of its predecessors. The row model is
+\begin{equation}
+  \y = \X\bb + \boldsymbol\varepsilon,\qquad \boldsymbol\varepsilon\sim\mathcal N(0,\sigma^2\I),
+\end{equation}
+and $\Lm_{ii}=1$, $\Lm_{i,P(i)}=-\bb^\top$, $\Dm_{ii}=1/\sigma^2$, $\widehat\B^{-1}=\Lm^\top\Dm\Lm$.
+The standard estimator is ridge regression,
+\begin{equation}
+  \widehat\bb = (\X^\top\X + a\I)^{-1}\X^\top\y,\qquad a=\alpha\,\tr(\X^\top\X)/p,
+  \label{eq:ridge}
+\end{equation}
+with $\alpha$ dimensionless and the same for every row. This is the posterior mean of
+$\bb$ under the prior $\bb\sim\mathcal N(0,\sigma^2/a\,\I)$.
+
+\subsection{Bayesian rows}
+We keep the likelihood and change the prior. All statistics are kept in correlation
+scale -- $\X$ and $\y$ standardised by their ensemble standard deviations -- so that
+cycles with different spread contribute equally; coefficients are rescaled at the end.
+
+\paragraph{Sequential prior.} Let $\G_t=\X_t^\top\X_t/N$ and $\bv_t=\X_t^\top\y_t/N$
+be the sufficient statistics of cycle $t$. The row keeps a memory
+\begin{equation}
+  \G_t^{\rm mem} = \rho_t\,\G_{t-1}^{\rm mem} + \G_t,\qquad
+  \bv_t^{\rm mem} = \rho_t\,\bv_{t-1}^{\rm mem} + \bv_t,
+  \label{eq:memory}
+\end{equation}
+with forgetting factor $\rho_t\in[0,1)$: the posterior of one cycle is the prior of the
+next, discounted.
+
+\paragraph{Climatological term.} From $M$ independent states of the model's climatology
+the same statistics are computed once, $\G^{c}$, $\bv^{c}$, weighted by $w_0=M/N$: the
+climatology is worth as many cycles as ensembles fit in it. At cycle $t$ the row's prior
+is $\G^{\rm mem}_t + w_t\G^c$, $\bv^{\rm mem}_t+w_t\bv^c$ with $w_t\in[0,w_0]$.
+
+\paragraph{Estimator.} The row coefficients are
+\begin{equation}
+  \widehat\bb_t = \big(\G^{\rm mem}_t + w_t\G^c + a\,\mathbf{T}\big)^{-1}\big(\bv^{\rm mem}_t+w_t\bv^c\big),
+  \qquad \mathbf T=\operatorname{diag}\big((1+\tau d_{ij})^2\big),
+  \label{eq:bayesrow}
+\end{equation}
+where $d_{ij}$ is the Chebyshev distance from $i$ to predecessor $j$ and $\tau$ a
+tapering slope: the penalty of a coefficient grows with the distance of its predecessor,
+a soft version of the banded Cholesky. The residual variance $\sigma^2$ is that of the
+current ensemble under $\widehat\bb_t$, so the scale of $\widehat\B^{-1}$ follows the
+ensemble while its shape draws on the memory and the climatology.
+
+\paragraph{Hyperparameters by evidence.} $\rho_t$ and $w_t$ are chosen, per row and per
+cycle, to maximise the marginal likelihood of the new anomalies under the prior:
+\begin{equation}
+  (\rho_t,w_t)=\arg\max\ \log\mathcal N\!\Big(\y_t;\ \X_t\bb^{\rm prior},\ \sigma^2\big(\I+\X_t\mathbf P^{-1}\X_t^\top\big)\Big),
+  \qquad \mathbf P = N\big(\rho\,\G^{\rm mem}_{t-1}+w\,\G^c\big),
+  \label{eq:evidence}
+\end{equation}
+over a small grid ($\rho\in\{0.2,0.4,0.6,0.8,0.95\}$, $w/w_0\in\{0,0.1,0.3,1\}$), with
+$\sigma^2$ profiled out. Each evaluation is one $N\times N$ Cholesky; the cost per cycle
+is a small multiple of the plain EnKF-MC. The evidence penalises prior complexity
+($\log\det$ term) and does not reward fitting noise, unlike cross-validation; it uses
+only forecast anomalies, never observations or truth.
+
+\paragraph{What the evidence cannot choose.} The tapering slope $\tau$ (and the base
+ridge $\alpha$) are localization hyperparameters: they protect the \emph{analysis}
+from noisy long-range coefficients, and the row likelihood does not see the analysis.
+Chosen by the row evidence they go to zero and the filter degrades (measured,
+Section~\ref{sec:results}). They are therefore treated like the radius and the
+inflation: fixed by a sensitivity sweep.
+
+\paragraph{Structure.} The predecessor set is the square of radius 2 (the optimum of
+the uniform sweep at $N=40$) united with the climatological predecessors selected by a
+lasso row regression on the $M$ climate states (window 6, universal-threshold penalty
+with $c=0.5$). With the tapered ridge the long links cost nothing once the climatology
+has been released; without it they do (Section~\ref{sec:results}).
+
+\section{Testbed}\label{sec:setup}
+Quasi-geostrophic model of Sakov and Oke as implemented in \texttt{pyteda}, $49\times49$
+grid, dissipation ten times the default so that a stationary regime exists, state
+$q$ only, Dirichlet boundary excluded from estimation ($47\times47=2209$ components),
+$dt=0.3125$, 20 time units between analyses. Climatology: spin-up to $t=20000$ then
+200 snapshots every 250 units (81 every 200 in the development runs); ensemble members
+and truth are independent draws from it. Observations of $q$ (or of $\psi$, Sakov and
+Oke's choice, through the Helmholtz inverse) with 5\% of the climatological spread as
+error, on a fixed lattice of stride 2 (24\% of the interior) or on random networks
+observing 1--40\% of it. Multiplicative inflation 1.05, calibrated for the plain
+EnKF-MC; $\alpha=0.3$; $N=40$. Errors are RMSE of $q$ over the interior in units of
+the climatological standard deviation, so that 1 is ``as bad as not assimilating''.
+
+\section{Results}\label{sec:results}
+
+\subsection{First analysis from a climatological ensemble}
+At the first analysis the background error \emph{is} the climatology, and the
+climatological prior mean is exact. Table~\ref{tab:first} gives the ratio of analysis to
+background RMSE for five seeds, observing $\psi$, random network at 25\%.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{@{}lrrrr@{}}\toprule
+structure & ridge$\to0$ & ridge$\to\bb^c$, $\alpha=100$ \\\midrule
+uniform $r=1$ & 0.707 & 0.691\\
+uniform $r=2$ & 0.738 & 0.684\\
+uniform $r=3$ & 0.760 & 0.669\\
+uniform $r=4$ & 0.817 & \textbf{0.658}\\
+climate lasso $w6$ & 0.709 & 0.660\\
+LETKF $r=1$ & 0.792 & --\\\bottomrule
+\end{tabular}
+\caption{First analysis, $\psi$ observed, random network 25\%, $N=40$, five seeds.
+With the climatological prior the ordering of the radii inverts: the wide row, useless
+when estimated from 40 members, is the best when its coefficients come from 81 climate
+states. The gain over the best plain row is 7\%. Across densities 1--40\% and both
+observed variables the climatological prior is first at every density (2--9\%).}
+\label{tab:first}
+\end{table}
+
+The dense climatological covariance of the same 81 states, used as an oracle $\B$ in a
+Kalman analysis, gives 0.894 at 1\% density where the method gives 0.937 and the best
+uniform row 0.971: the information limit of 22 observations is close, and the method
+recovers about half of what separates the plain row from it.
+
+\subsection{Cycled runs}
+Figure~\ref{fig:rmse} shows 34 cycles on the lattice. The plain EnKF-MC with $r=2$
+converges to 0.11; the LETKF, at its best radius, to 0.40; the Bayesian rows to 0.10,
+below the plain rows at every cycle (ratio 0.80--0.95). Without the tapered ridge, the
+climatological long links help at cycle 0 and then cost a plateau (0.71$\to$0.72$\to$0.72)
+before recovering to 0.16; with it the descent is monotone from the best start.
+
+\begin{figure}[h]\centering \fig{../results/figures_dev/bayes_rows_taper.png}{0.95}
+\caption{Analysis RMSE per cycle, QG, $N=40$, lattice 24\%, inflation 1.05, one seed.}
+\label{fig:rmse}\end{figure}
+
+\subsection{What the evidence decides}
+Figure~\ref{fig:maps} maps the hyperparameters chosen row by row. At cycle 0 the
+climatological weight is at its maximum over the jet and the eddies and already
+released in the quiescent north; from cycle 1 it is near zero everywhere but a few
+rows. The forgetting factor is high (memory kept) in the north and low (forget) along
+the jet. The implied background correlation of a point passes from the climatological
+bands at cycle 0 to a local blob at cycle 15 with the same twelve neighbours in the
+row: the values and the memory do the work, not the pattern.
+
+\begin{figure}[h]\centering \fig{../results/figures_dev/bayes_rows_structure.png}{0.98}
+\caption{Flow, climatological weight chosen at cycles 0 and 15, forgetting factor at
+cycle 15, and the implied correlation of one point at cycles 0 and 15.}
+\label{fig:maps}\end{figure}
+
+\subsection{Sensitivity and what is fixed by hand}
+$\rho$ and $w$ are chosen by the evidence; $w_0=M/N$ is a definition. Fixed: $\alpha=0.3$,
+$r=2$, inflation 1.05 (inherited, sensitivity in the supplement), $\tau=0.3$
+($\tau=1$ over-regularises: 0.20 at cycle 33; $\tau=0$ leaves the long links noisy),
+and the climate lasso window and penalty (insensitive with the taper). Choosing
+$\tau$ by the row evidence selects $\tau=0$ and the run ends at 0.25: the evidence of
+a row is not the right criterion for a localization parameter.
+
+\section{What does not work, and why}\label{sec:negative}
+Five ways of choosing \emph{which} predecessors a row uses were tried on the same
+testbed, each cycled for at least 36 cycles: a variational cost per component (which
+selects the \emph{least} correlated candidate, a defect of its algebra), the partial
+correlations of a wide probe precision, the trajectories of the ensemble-mean flow,
+the lagged cross-correlation between analysis and forecast ensembles (an estimate of
+the propagator), and a lasso row selection on the ensemble. All of them beat the
+uniform square on a single analysis and none beats it after ten cycles. The reason is
+visible in a perturbation experiment: a point perturbation of $q$ does not travel
+along the flow within an assimilation interval, or within ten of them; it grows in
+place. The converged forecast error is local, fast-decaying, and $r=2$ is the
+Bickel--Levina optimum for it at $N=40$. Structures richer than that pay selection
+noise without removing bias. The climatological structure is the one exception, and
+only because the climatology, not the ensemble, supplies its coefficients.
+
+\section{Discussion}\label{sec:discussion}
+The method is a hybrid of climatological and ensemble information built inside the
+precision, row by row, without a dense climatological covariance, without a blending
+weight for covariances, and with the blending decided by the data where it can be. Its
+cost is a small multiple of the EnKF-MC. Its gains are in the first analyses, in the
+transient, and modestly in the converged state; they are measured on one seed and one
+network and must be confirmed on sparse random networks with the LETKF alongside,
+which is the experiment in progress. The evidence chooses memory and climatological
+weight well; it cannot choose the tapering, and we do not claim it can.
+
+\end{document}

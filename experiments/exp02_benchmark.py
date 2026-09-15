@@ -45,7 +45,7 @@ def arm_name(arm):
         return f"fixed{int(r)}"
     if kind == "partial":
         return f"partial{int(r)}"
-    return kind          # "flow"
+    return kind          # "bayes"
 
 
 def cells_for(scale, only=None):
@@ -53,10 +53,11 @@ def cells_for(scale, only=None):
     for tanda, over, filt_arms, networks in scale.tandas():
         if only and tanda != only:
             continue
+        seeds = scale.seeds[:1] if tanda.startswith("E3_") else scale.seeds
         for net in networks:
             for filt, arms in filt_arms:
                 for arm in arms:
-                    for seed in scale.seeds:
+                    for seed in seeds:
                         cells.append(dict(tanda=tanda, over=over, network=net,
                                           filt=filt, arm=arm, seed=seed))
     return cells
@@ -84,7 +85,7 @@ def main():
         tags = dict(tanda=c["tanda"], network=c["network"], filt=c["filt"],
                     arm=name, kind=kind, radius=c["arm"][1] if kind == "fixed" else -1,
                     rho=c["arm"][1] if kind == "partial" else -1,
-                    seed=c["seed"], N=cfg.ensemble_size, alpha=cfg.ridge_alpha,
+                    seed=c["seed"], N=cfg.ensemble_size, alpha=cfg.ridge_alpha, obs_var=cfg.obs_var,
                     stride=cfg.obs_stride if c["network"] == "lattice" else -1,
                     density=cfg.obs_density if c["network"] != "lattice" else -1.0)
         if os.path.exists(out_dir):

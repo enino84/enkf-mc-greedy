@@ -1,6 +1,8 @@
 SCALE ?= smoke
 IMAGE ?= qgloc:latest
 SHARDS ?= 4
+SHARD_INDEX ?= 0
+SHARD_COUNT ?= 1
 DOCKER_RUN = docker run --rm -e SCALE=$(SCALE) -e PYTHONHASHSEED=0 -e OMP_NUM_THREADS=1 \
 	-v $(PWD)/results:/work/results -v $(PWD)/paper:/work/paper $(IMAGE)
 
@@ -16,6 +18,7 @@ cache:          ; $(DOCKER_RUN) python -c "import sys; sys.path.insert(0,'/work/
 single:         ; $(DOCKER_RUN) python /work/experiments/exp01_single_cycle.py $(SCALE)
 bench:          ; $(DOCKER_RUN) python /work/experiments/exp02_benchmark.py $(SCALE)
 figures:        ; $(DOCKER_RUN) bash /work/scripts/figures.sh $(SCALE)
+exp05:          ; docker run -d --name qgloc-exp05 -e SCALE=$(SCALE) -e SHARD_INDEX=$(SHARD_INDEX) -e SHARD_COUNT=$(SHARD_COUNT) -e PYTHONHASHSEED=0 -e OMP_NUM_THREADS=1 -v $(PWD)/results:/work/results -v $(PWD)/paper:/work/paper $(IMAGE) python /work/experiments/exp05_first_analysis.py $(SCALE)
 exp03:          ; docker run -d --name qgloc-exp03 -e SCALE=$(SCALE) -e PYTHONHASHSEED=0 -e OMP_NUM_THREADS=1 -v $(PWD)/results:/work/results -v $(PWD)/paper:/work/paper $(IMAGE) python /work/experiments/exp03_flow_probe.py $(SCALE)
 # EXP-02 split over $(SHARDS) background containers (compute the cache first)
 shards:         ; $(MAKE) cache; for i in $$(seq 0 $$(( $(SHARDS) - 1 ))); do \

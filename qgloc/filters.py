@@ -70,6 +70,10 @@ from scipy.sparse.linalg import spsolve
 from .assignment import NONE, assign_cycle, assign_partial
 from .flow import FlowGrid
 from .lagged import LaggedGrid
+from .lasso_struct import LassoGrid
+from .clim_struct import ClimGrid
+from .bayes_rows import BayesRows
+from .shrink_rows import ShrinkRows
 from .precision import PrecisionBuilder
 
 FIXED = "fixed"        # arm ("fixed", r): the uniform-radius baseline
@@ -99,35 +103,45 @@ def forecast(bed, X, x_true):
     return Xf, x_true
 
 
-def observe(bed, x_true, obs_idx, rng):
-    """Observations of normalized ``q`` at ``obs_idx`` with the configured noise."""
+def observe(bed, x_true, obs_idx, rng, H=None):
+    """Observations at ``obs_idx`` with the configured noise: of normalized q, or of
+    normalized psi through the dense operator ``H`` (5% of psi's climatological spread)."""
     xtn = bed.normalize(x_true)[bed.qblock]
-    return xtn[obs_idx] + bed.cfg.obs_std * rng.standard_normal(obs_idx.size)
+    clean = xtn[obs_idx] if H is None else H @ xtn
+    return clean + bed.cfg.obs_std * rng.standard_normal(obs_idx.size)
+
+
+def _analysis_solve(cfg, Qn, Binv, obs_idx, y, rng, H=None):
+    """Perturbed-observation analysis in precision form; sparse for point obs, dense for psi."""
+    nq, N = Qn.shape; p = obs_idx.size; rinv = 1.0 / cfg.obs_std ** 2
+    E = cfg.obs_std * rng.standard_normal((p, N))
+    if H is None:
+        Hs = sps.csr_matrix((np.ones(p), (np.arange(p), obs_idx)), shape=(p, nq))
+        A = (Binv + rinv * (Hs.T @ Hs)).tocsc()
+        D = (y[:, None] + E) - (Hs @ Qn)
+        Z = spsolve(A, sps.csc_matrix(rinv * (Hs.T @ D)))
+        Z = Z.toarray() if sps.issparse(Z) else np.asarray(Z)
+    else:
+        A = Binv.toarray() + rinv * (H.T @ H)
+        D = (y[:, None] + E) - (H @ Qn)
+        Z = np.linalg.solve(A, rinv * (H.T @ D))
+    return Qn + Z.reshape(nq, N)
 
 
 # ----------------------------------------------------------------------
-def analysis_enkf_mc(bed, Qn, r_field, obs_idx, y, rng, pb=None):
-    """Perturbed-observation EnKF in precision form. ``Qn``: (nq, N) normalized q."""
+def analysis_enkf_mc(bed, Qn, r_field, obs_idx, y, rng, pb=None, H=None):
+    """Perturbed-observation EnKF in precision form. ``Qn``: (nq, N) normalized q.
+    ``H`` dense (p x nq) for psi observations, None for point observations of q."""
     cfg = bed.cfg
-    nq, N = Qn.shape
     DX = Qn - Qn.mean(axis=1, keepdims=True)
     if pb is None:
         pb = PrecisionBuilder(bed.grid, alpha=cfg.ridge_alpha)
     pb.bind(DX)
     Binv = pb.build(r_field)
-
-    p = obs_idx.size
-    H = sps.csr_matrix((np.ones(p), (np.arange(p), obs_idx)), shape=(p, nq))
-    rinv = 1.0 / cfg.obs_std ** 2
-    A = (Binv + rinv * (H.T @ H)).tocsc()
-    E = cfg.obs_std * rng.standard_normal((p, N))
-    D = (y[:, None] + E) - (H @ Qn)
-    Z = spsolve(A, sps.csc_matrix(rinv * (H.T @ D)))
-    Z = Z.toarray() if sps.issparse(Z) else np.asarray(Z)
-    return Qn + Z.reshape(nq, N), Binv
+    return _analysis_solve(cfg, Qn, Binv, obs_idx, y, rng, H=H), Binv
 
 
-def analysis_letkf(bed, Qn, r_field, obs_idx, y, assigned=None):
+def analysis_letkf(bed, Qn, r_field, obs_idx, y, assigned=None, H=None):
     """LETKF over square interior neighbourhoods. ``Qn``: (nq, N) normalized q.
 
     With ``assigned`` (observation index per component, or NONE) the local
@@ -144,7 +158,10 @@ def analysis_letkf(bed, Qn, r_field, obs_idx, y, assigned=None):
     # observation lookup: state index -> observation row, -1 if unobserved
     where = np.full(nq, -1, dtype=int)
     where[obs_idx] = np.arange(obs_idx.size)
-    innov = y - qb[obs_idx]
+    if H is None:
+        innov = y - qb[obs_idx]; Yall = DX[obs_idx, :]
+    else:
+        innov = y - H @ qb; Yall = H @ DX          # psi anomalies at the sites
 
     Qa = Qn.copy()
     for i in np.flatnonzero(grid.interior):
@@ -158,7 +175,7 @@ def analysis_letkf(bed, Qn, r_field, obs_idx, y, assigned=None):
             o = o[o >= 0]
         if o.size == 0:
             continue
-        Yb = DX[obs_idx[o], :]                       # (m, N)
+        Yb = Yall[o, :]                              # (m, N)
         C = Yb.T * rinv                              # (N, m)
         Pa_inv = (N - 1) * np.eye(N) + C @ Yb        # (N, N)
         w, V = np.linalg.eigh(Pa_inv)
@@ -259,7 +276,7 @@ def radius_field(bed, arm, DXq, xbq, obs_idx, y, rng):
     if kind == FIXED:
         rf = np.where(bed.grid.interior, int(r), 0)
         return rf, None
-    if kind in (FLOW, "lagged"):
+    if kind in (FLOW, "lagged", "lasso", "clim", "bayes", "shrink", "climstart"):
         return np.where(bed.grid.interior, 1, 0), None      # the structure is built in the analysis
     if kind == PARTIAL:
         out = assign_partial(bed, DXq, obs_idx, rho=r,
@@ -283,6 +300,10 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
     rows = []
     n_cyc = int(cycles or cfg.cycles)
     DXa_prev = None
+    clim_grid = None
+    bayes = None
+    shrink = None
+    spread0 = None
     for k in range(n_cyc):
         try:
             Xf, x_true = forecast(bed, X, x_true)
@@ -292,7 +313,8 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
                 recorder.diverged(k)
             break
         obs_idx = bed.network(cycle=k, seed=seed, kind=network)
-        y = observe(bed, x_true, obs_idx, rng)
+        Hobs = bed.obs_operator(obs_idx)
+        y = observe(bed, x_true, obs_idx, rng, H=Hobs)
 
         Qn = bed.normalize(Xf)[qb, :]
         xbq = Qn.mean(axis=1)
@@ -304,9 +326,9 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
         t0 = time.time()
         Binv = None; extra = {}; rec_flow = {}
         if filt == "enkf-mc":
-            Qa, Binv = analysis_enkf_mc(bed, Qn, rf, obs_idx, y, rng, pb=pb)
+            Qa, Binv = analysis_enkf_mc(bed, Qn, rf, obs_idx, y, rng, pb=pb, H=Hobs)
         elif filt == "letkf":
-            Qa = analysis_letkf(bed, Qn, rf, obs_idx, y)
+            Qa = analysis_letkf(bed, Qn, rf, obs_idx, y, H=Hobs)
         elif filt == "enkf-mc-flow":
             psi = bed.psi_from_q(Xf.mean(axis=1))[bed.blocks["psi"]]
             fgrid = FlowGrid(bed.grid, psi, cfg.obs_freq, cap=cfg.wake_cap, width=cfg.wake_width, local=cfg.wake_local)
@@ -325,6 +347,72 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
                 Qa, Binv = analysis_enkf_mc(bed, Qn, rf, obs_idx, y, rng, pb=PrecisionBuilder(lg, alpha=cfg.ridge_alpha))
                 sup = lg.support
                 rec_flow = dict(pred_mean=float(sup[bed.grid.interior].mean()), pred_max=int(sup.max()))
+        elif filt == "enkf-mc-lasso":
+            lg = LassoGrid(bed.grid, DXq, window=cfg.lasso_window, c=cfg.lasso_c, local=cfg.wake_local)
+            Qa, Binv = analysis_enkf_mc(bed, Qn, rf, obs_idx, y, rng, pb=PrecisionBuilder(lg, alpha=cfg.ridge_alpha))
+            sup = lg.support
+            rec_flow = dict(pred_mean=float(sup[bed.grid.interior].mean()), pred_max=int(sup.max()))
+        elif filt == "enkf-mc-clim":
+            if clim_grid is None:
+                clim_q = bed.normalize(bed.snapshots.T.astype(float))[bed.qblock, :]
+                clim_grid = ClimGrid(bed.grid, clim_q, window=cfg.lasso_window, c=cfg.lasso_c, local=cfg.wake_local)
+                pb = PrecisionBuilder(clim_grid, alpha=cfg.ridge_alpha)
+                sup = clim_grid.support
+                rec_flow = dict(pred_mean=float(sup[bed.grid.interior].mean()), pred_max=int(sup.max()))
+            Qa, Binv = analysis_enkf_mc(bed, Qn, rf, obs_idx, y, rng, pb=pb)
+        elif filt == "enkf-mc-climstart":
+            # the method that survived the weekend: climate structure and climate
+            # prior on the coefficients at the first analysis (alpha0), plain
+            # uniform radius with ridge toward zero from the second cycle on
+            if k < int(cfg.climstart_cycles):
+                if shrink is None:
+                    clim_q = bed.normalize(bed.snapshots.T.astype(float))[bed.qblock, :]
+                    A_c = clim_q - clim_q.mean(axis=1, keepdims=True)
+                    cg = ClimGrid(bed.grid, clim_q, window=cfg.lasso_window, c=cfg.lasso_c, local=1)
+                    shrink = ShrinkRows(bed.grid, cg, A_c)
+                Binv = shrink.build(DXq, alpha=cfg.shrink_alpha0)
+                Qa = _analysis_solve(cfg, Qn, Binv, obs_idx, y, rng, H=Hobs)
+            else:
+                Qa, Binv = analysis_enkf_mc(bed, Qn, np.where(bed.grid.interior, int(cfg.climstart_radius), 0), obs_idx, y, rng, pb=pb)
+        elif filt == "enkf-mc-shrink":
+            if shrink is None:
+                clim_q = bed.normalize(bed.snapshots.T.astype(float))[bed.qblock, :]
+                A_c = clim_q - clim_q.mean(axis=1, keepdims=True)
+                cg = ClimGrid(bed.grid, clim_q, window=cfg.lasso_window, c=cfg.lasso_c, local=1)
+                shrink = ShrinkRows(bed.grid, cg, A_c)
+            s_now = float(np.mean(np.std(DXq[bed.grid.interior], axis=1)))
+            if spread0 is None:
+                spread0 = s_now
+            if cfg.shrink_alpha0 <= 0:
+                al = None
+            elif cfg.shrink_decay > 0:
+                al = max(cfg.shrink_floor, cfg.shrink_alpha0 * cfg.shrink_decay ** k)
+            else:
+                al = max(cfg.shrink_floor, cfg.shrink_alpha0 * (s_now / spread0) ** 2)
+            Binv = shrink.build(DXq, alpha=al)
+            Qa = _analysis_solve(cfg, Qn, Binv, obs_idx, y, rng, H=Hobs)
+            la = shrink.last_alpha[bed.grid.interior]
+            rec_flow = dict(pred_mean=float(np.nanmedian(la)), pred_max=int(np.nanmax(la)))   # median / max chosen alpha
+        elif filt in ("enkf-mc-bayes", "enkf-mc-bayes-uniform"):
+            if bayes is None:
+                clim_q = bed.normalize(bed.snapshots.T.astype(float))[bed.qblock, :]
+                A_c = clim_q - clim_q.mean(axis=1, keepdims=True)
+                if filt == "enkf-mc-bayes":
+                    cg = ClimGrid(bed.grid, clim_q, window=cfg.lasso_window, c=min(cfg.lasso_c, 1e6), local=cfg.wake_local)
+                    struct = lambda i: cg.pred[i]
+                else:
+                    struct = lambda i: bed.grid.predecessors(i, int(cfg.bayes_radius))
+                cw = cfg.bayes_clim_weight if cfg.bayes_clim_weight > 0 else A_c.shape[1] / DXq.shape[1]   # M / N
+                bayes = BayesRows(bed.grid, struct, A_c, alpha=cfg.ridge_alpha, rho=cfg.bayes_rho, clim_weight=cw, clim_decay=cfg.bayes_clim_decay, taper=cfg.bayes_taper)
+            Binv = bayes.update_and_build(DXq)
+            if cfg.bayes_rho < 0:
+                lr = bayes.last_rho[bed.grid.interior]
+                rec_flow = dict(pred_mean=float(np.nanmean(lr)), pred_max=int(np.nanmax(lr) * 100),
+                                frac_low=float(np.mean(lr <= 0.4)), frac_high=float(np.mean(lr >= 0.95)),
+                                wc_mean=float(np.mean(bayes.last_wc[bed.grid.interior])), taper=float(bayes.taper))
+            Qa = _analysis_solve(cfg, Qn, Binv, obs_idx, y, rng, H=Hobs)
+        elif Hobs is not None and filt in ("enkf-mc-masked", "enkf-mc-group", "letkf-only", "enkf-mc-lagged", "enkf-mc-lasso", "enkf-mc-clim"):
+            raise ValueError(f"{filt} supports point observations of q only (obs_var='q')")
         elif filt == "enkf-mc-masked":
             keep = aout["obs_used"].nonzero()[0][::max(1, aout["obs_used"].sum() // 3)][:3] if k in snap else ()
             Qa, Binv, cols = analysis_enkf_mc_masked(bed, Qn, rf, obs_idx, y, aout["assigned_obs"], rng,

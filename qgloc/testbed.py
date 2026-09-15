@@ -92,6 +92,7 @@ class QGConfig:
     obs_stride: int = 4          # lattice spacing; density is 1/stride^2
     obs_network: str = "lattice" # lattice | random-fixed | random-moving
     obs_density: float = 0.25    # fraction of the interior observed by the random networks
+    obs_var: str = "psi"         # "psi" (Sakov & Oke: streamfunction, non-local in q) or "q"
     obs_std: float = 0.05        # in normalized units, so 5% of each spread
     obs_freq: float = 20.0       # time between assimilation cycles
     inflation: float = 1.05         # 1.15 blows the spread up over 60 cycles on a fixed lattice, measured
@@ -113,9 +114,27 @@ class QGConfig:
     # EnKF-MC-flow: wake length cap (grid points of travel) and half-width.
     wake_cap: float = 8.0
     wake_width: float = 1.0
-    wake_local: int = 2             # square of this radius added to every wake (2 measured best at N = 40)
+    wake_local: int = 2             # square added to the climate structure (enkf-mc-bayes) and to wakes
     # EnKF-MC-lagged: window and noise multiple for the lagged cross-correlation
     lag_window: int = 6
+    # EnKF-MC-lasso: window and penalty multiple of the universal threshold
+    lasso_window: int = 6
+    lasso_c: float = 0.5
+    # EnKF-MC-bayes: forgetting factor of the recursive rows, weight of the
+    # climatology in the initial prior, and the radius for the uniform variant
+    bayes_rho: float = -1.0         # -1: chosen per row by marginal likelihood
+    bayes_clim_weight: float = 0.0  # <= 0: M/N, the climatology counted in ensembles' worth
+    bayes_clim_decay: float = -1.0  # < 1: the climate prior fades as weight*decay^t on its own clock; -1: by evidence
+    bayes_taper: float = 0.3        # ridge penalty of predecessor j scaled by (1 + taper*dist)^2; -1: by evidence (fails, measured)
+    bayes_radius: int = 2
+    # EnKF-MC-shrink: alpha follows the ensemble spread, alpha0*(s_t/s_0)^2, floored;
+    # alpha0 <= 0 means choose alpha per row by leave-one-out (overfits, measured)
+    shrink_alpha0: float = 10.0
+    shrink_floor: float = 0.3
+    shrink_decay: float = 0.5        # alpha_t = alpha0 * decay^t (0: follow the spread instead -- unstable, measured)
+    # EnKF-MC-climstart: climate prior for the first cycles, then a uniform radius
+    climstart_cycles: int = 1
+    climstart_radius: int = 2
     lag_c: float = 3.0              # 2 overfits (18 predecessors, spread collapse), 4 underfits; measured at N = 40
 
 
@@ -260,6 +279,27 @@ class Testbed:
         if kind == "random-moving":
             return self.random_network(count, seed=int(seed) * 100003 + 1 + int(cycle))
         raise ValueError(f"unknown network kind {kind!r}: lattice, random-fixed, random-moving")
+
+    def psi_operator(self):
+        """``H_psi``: psi at every point as a linear function of normalized q (nq x nq).
+
+        The Helmholtz inverse is linear with the Dirichlet boundary; one solve per
+        unit vector, computed once and cached. Row j gives psi_norm at point j.
+        """
+        if getattr(self, "_Hpsi", None) is None:
+            H = np.zeros((self.nq, self.nq))
+            pbk = self.blocks["psi"]
+            for i in range(self.nq):
+                x = np.zeros(self.n); x[self.qblock.start + i] = 1.0
+                H[:, i] = self.psi_from_q(x)[pbk]
+            self._Hpsi = H * (self.spread["q"] / self.spread["psi"])
+        return self._Hpsi
+
+    def obs_operator(self, obs_idx):
+        """Dense H (p x nq) in normalized units for the configured observed variable, or None for q."""
+        if self.cfg.obs_var == "q":
+            return None
+        return self.psi_operator()[np.asarray(obs_idx)]
 
     def density(self, stride=None):
         """Observed fraction of the interior."""

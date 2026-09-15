@@ -22,23 +22,23 @@ ARM_LABEL = dict(greedy="assignment by J (first draft)", nearest="nearest observ
                  random="random candidate", variance="raw-variance rule", uniform="uniform radius")
 ARM_COLOR = dict(greedy="#7b3294", nearest="#2166ac", random="#4d4d4d", variance="#1b9e77", uniform="#e08214")
 PARTIAL_COLORS = {3: "#ef8a62", 4: "#b2182b", 5: "#67001f", 2: "#f4a582"}
-FILT_LABEL = {"enkf-mc": "EnKF-MC", "letkf": "LETKF", "enkf-mc-masked": "EnKF-MC masked",
+FILT_LABEL = {"enkf-mc": "EnKF-MC", "letkf": "LETKF", "enkf-mc-bayes": "EnKF-MC Bayesian rows", "enkf-mc-masked": "EnKF-MC masked",
               "enkf-mc-group": "EnKF-MC group", "letkf-only": "LETKF-only"}
 
 
 def is_partial(arm):
-    return str(arm).startswith("partial")
+    return str(arm).startswith("partial") or str(arm) == "bayes"
 
 
 def method_arms(arms):
     """The partial arms of a list, sorted by rho."""
-    return sorted([a for a in arms if is_partial(a)], key=lambda a: int(a[7:]))
+    return sorted([a for a in arms if is_partial(a)], key=lambda a: (a != "bayes", a))
 
 
 def main_arm(arms):
     """The method arm to draw when only one is drawn: rho = 4 if present."""
     m = method_arms(arms)
-    return "partial4" if "partial4" in m else (m[0] if m else None)
+    return "bayes" if "bayes" in m else ("partial4" if "partial4" in m else (m[0] if m else None))
 
 
 def rule_arms(arms):
@@ -130,6 +130,8 @@ def obs_rc(obs_idx, g):
 def label_arm(arm):
     if arm.startswith("fixed"):
         return f"uniform r={arm[5:]}"
+    if arm == "bayes":
+        return "EnKF-MC, Bayesian rows"
     if is_partial(arm):
         return f"partial-corr. radii, ρ={arm[7:]}"
     return ARM_LABEL.get(arm, arm)
@@ -140,6 +142,8 @@ def color_arm(arm, cmap=None):
         import matplotlib.pyplot as plt
         r = int(arm[5:])
         return plt.get_cmap("YlOrBr")(0.3 + 0.08 * r)
+    if arm == "bayes":
+        return "#b2182b"
     if is_partial(arm):
         return PARTIAL_COLORS.get(int(arm[7:]), "#b2182b")
     return ARM_COLOR.get(arm, "k")

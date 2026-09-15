@@ -17,7 +17,8 @@ from common_fig import (FILT_LABEL, color_arm, fig_dir, label_arm, load_metrics,
 
 def rmse_vs_cycle(scale, plt, tanda="main"):
     m = load_metrics(scale)
-    m = m[(m.tanda == tanda) & (~m.diverged.astype(bool))]
+    m = m[(m.tanda == tanda) & (~m.diverged.astype(bool))].copy()
+    m.loc[m.filt == "enkf-mc-bayes", "filt"] = "enkf-mc"        # the method is drawn in the EnKF-MC panel
     nets = sorted(m.network.unique()); filts = [f for f in ("enkf-mc", "letkf") if f in set(m.filt)]
     fig, axes = plt.subplots(len(nets), len(filts), figsize=(4.2 * len(filts), 3.0 * len(nets)),
                              squeeze=False, sharey="row")
@@ -46,7 +47,8 @@ def rmse_vs_cycle(scale, plt, tanda="main"):
 
 def rmse_vs_radius(scale, plt, tanda="main"):
     s = load_summary(scale)
-    s = s[s.tanda == tanda]
+    s = s[s.tanda == tanda].copy()
+    s.loc[s.filt == "enkf-mc-bayes", "filt"] = "enkf-mc"
     nets = sorted(s.network.unique()); filts = [f for f in ("enkf-mc", "letkf") if f in set(s.filt)]
     fig, axes = plt.subplots(len(nets), len(filts), figsize=(4.2 * len(filts), 3.0 * len(nets)),
                              squeeze=False, sharey="row")
@@ -85,7 +87,7 @@ def rmse_vs_radius(scale, plt, tanda="main"):
 def divergence_map(scale, plt, tanda="main"):
     s = load_summary(scale)
     s = s[s.tanda == tanda].copy()
-    s["cell"] = s.network + " / " + s.filt.map(FILT_LABEL)
+    s["cell"] = s.network.astype(str) + " / " + s.filt.map(lambda f: FILT_LABEL.get(f, f))
     arms = sorted([a for a in s.arm.unique() if a.startswith("fixed")], key=lambda a: int(a[5:])) \
         + method_arms(s.arm.unique()) + rule_arms(s.arm.unique())
     cells = sorted(s.cell.unique())
@@ -113,9 +115,12 @@ def divergence_map(scale, plt, tanda="main"):
 def sensitivity(scale, plt):
     """Uniform sweep vs the method across the N tandas and the checks, EnKF-MC, lattice."""
     s = load_summary(scale)
-    s = s[(s.network == "lattice") & (s.filt == "enkf-mc")]
+    s = s[s.filt.isin(["enkf-mc", "enkf-mc-bayes"])].copy()
+    s.loc[s.filt == "enkf-mc-bayes", "filt"] = "enkf-mc"
     tandas = [t for t in sorted(s.tanda.unique(), key=lambda t: (not t.startswith("N"), t))
-              if t not in ("oneobs", "legacy")]
+              if t.startswith("N")]
+    if not tandas:
+        return
     fig, axes = plt.subplots(1, len(tandas), figsize=(3.6 * len(tandas), 3.0), squeeze=False, sharey=True)
     for ax, t in zip(axes[0], tandas):
         sub = s[s.tanda == t]
@@ -163,6 +168,21 @@ def oneobs(scale, plt):
     fig.tight_layout(); fig.savefig(os.path.join(fig_dir(scale), "oneobs.png"), dpi=150); plt.close(fig)
 
 
+def ablation(scale, plt):
+    """E3: post-burn-in RMSE of every variant against the reference arms."""
+    s = load_summary(scale)
+    d = s[s.tanda.str.startswith("E3_")]
+    if d.empty:
+        return
+    d = d.assign(name=d.tanda.str.replace("E3_", "") + ": " + d.arm)
+    d = d.sort_values("rmse")
+    fig, ax = plt.subplots(figsize=(8, 0.3 * len(d) + 1.5))
+    cols = ["#b2182b" if a == "bayes" else "#4d4d4d" for a in d.arm]
+    ax.barh(d.name, d.rmse, color=cols); ax.set_xlabel("post-burn-in analysis RMSE in q"); ax.invert_yaxis()
+    ax.set_title("E3: sensitivity and ablation of the Bayesian rows (random-fixed 10%, one seed)", fontsize=10)
+    fig.tight_layout(); fig.savefig(os.path.join(fig_dir(scale), "ablation.png"), dpi=150); plt.close(fig)
+
+
 def main(scale):
     plt = setup_matplotlib()
     s = load_summary(scale)
@@ -172,6 +192,7 @@ def main(scale):
         divergence_map(scale, plt, t)
     sensitivity(scale, plt)
     oneobs(scale, plt)
+    ablation(scale, plt)
     print("benchmark figures ->", fig_dir(scale))
 
 

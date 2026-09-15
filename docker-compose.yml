@@ -26,6 +26,7 @@ x-common: &common
     OPENBLAS_NUM_THREADS: "1"
     MKL_NUM_THREADS: "1"
     TANDA: ${TANDA:-}
+    E1_ARGS: ${E1_ARGS:-}
   volumes:
     - ./results:/work/results
     - ./paper:/work/paper
@@ -62,10 +63,10 @@ services:
   shard2: { <<: *common, environment: { <<: *env, SHARD_INDEX: "2", SHARD_COUNT: "${SHARD_COUNT:-4}" }, command: python /work/experiments/exp02_benchmark.py }
   shard3: { <<: *common, environment: { <<: *env, SHARD_INDEX: "3", SHARD_COUNT: "${SHARD_COUNT:-4}" }, command: python /work/experiments/exp02_benchmark.py }
 
-  exp03:                       # EXP-03: lagged-propagator precision vs uniform, N = 40/80/120 (~4 h, one core)
+  exp05:                       # E1: first analysis, exhaustive (~3 h with 4 shards)
     <<: *common
-    container_name: qgloc-exp03
-    command: python /work/experiments/exp03_flow_probe.py
+    container_name: qgloc-exp05
+    command: python /work/experiments/exp05_first_analysis.py
 
   figures:                     # rebuild every figure and table from results/
     <<: *common
