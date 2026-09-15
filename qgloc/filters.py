@@ -69,6 +69,7 @@ from scipy.sparse.linalg import spsolve
 
 from .assignment import NONE, assign_cycle, assign_partial
 from .flow import FlowGrid
+from .lagged import LaggedGrid
 from .precision import PrecisionBuilder
 
 FIXED = "fixed"        # arm ("fixed", r): the uniform-radius baseline
@@ -258,7 +259,7 @@ def radius_field(bed, arm, DXq, xbq, obs_idx, y, rng):
     if kind == FIXED:
         rf = np.where(bed.grid.interior, int(r), 0)
         return rf, None
-    if kind == FLOW:
+    if kind in (FLOW, "lagged"):
         return np.where(bed.grid.interior, 1, 0), None      # the structure is built in the analysis
     if kind == PARTIAL:
         out = assign_partial(bed, DXq, obs_idx, rho=r,
@@ -281,6 +282,7 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
     snap = set(getattr(recorder, "snap_cycles", ()))
     rows = []
     n_cyc = int(cycles or cfg.cycles)
+    DXa_prev = None
     for k in range(n_cyc):
         try:
             Xf, x_true = forecast(bed, X, x_true)
@@ -315,6 +317,14 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
             extra["depth"] = fgrid.depth.astype(np.int16)
             rec_flow = dict(pred_mean=float(npred[bed.grid.interior].mean()), pred_max=int(npred.max()),
                             wake_mean=float(fgrid.wake_length()[bed.grid.interior].mean()))
+        elif filt == "enkf-mc-lagged":
+            if DXa_prev is None:
+                Qa, Binv = analysis_enkf_mc(bed, Qn, np.where(bed.grid.interior, 2, 0), obs_idx, y, rng, pb=pb)
+            else:
+                lg = LaggedGrid(bed.grid, DXa_prev, DXq, window=cfg.lag_window, c=cfg.lag_c, local=cfg.wake_local)
+                Qa, Binv = analysis_enkf_mc(bed, Qn, rf, obs_idx, y, rng, pb=PrecisionBuilder(lg, alpha=cfg.ridge_alpha))
+                sup = lg.support
+                rec_flow = dict(pred_mean=float(sup[bed.grid.interior].mean()), pred_max=int(sup.max()))
         elif filt == "enkf-mc-masked":
             keep = aout["obs_used"].nonzero()[0][::max(1, aout["obs_used"].sum() // 3)][:3] if k in snap else ()
             Qa, Binv, cols = analysis_enkf_mc_masked(bed, Qn, rf, obs_idx, y, aout["assigned_obs"], rng,
@@ -342,6 +352,7 @@ def run_cycles(bed, X0, x_true0, filt, arm, seed, network=None, recorder=None,
 
         xb = Xf.mean(axis=1)
         xa = Xa.mean(axis=1)
+        DXa_prev = Qa - Qa.mean(axis=1, keepdims=True)
         rec = dict(cycle=k, diverged=False, p_obs=int(obs_idx.size),
                    spread=float(np.mean(np.std(Qa[bed.grid.interior], axis=1))),
                    t_assign=t_assign, t_analysis=t_analysis,

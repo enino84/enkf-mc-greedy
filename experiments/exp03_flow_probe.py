@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-EXP-03  Does the flow-oriented structure pay off when the ensemble can carry it?
+EXP-03  Predecessors from the estimated propagator (enkf-mc-lagged) vs uniform.
 
-At N = 40 every structure richer than a uniform square loses over 40 cycles
-(measured 14-15 Sep). This runs the same comparison at N = 80 and 120 on the
-fixed lattice, stride 2, inflation 1.05, 60 cycles, one seed:
-
-    enkf-mc     uniform r = 2, 3, 4
-    enkf-mc-flow  wake ∪ square r = 1;  wake ∪ square r = 2;  wake alone
+The lagged cross-correlation between the previous analysis ensemble and the
+forecast ensemble estimates the propagator: which points fed each component
+during the interval. At N = 40 the structure it gives (threshold 3/sqrt(N))
+converges over 36 cycles to 0.16 against 0.11 for the best uniform radius;
+its errors are false positives of the selection, which shrink with N. This
+runs uniform r = 2, 3, 4 against lagged with c in {2.5, 3, 3.5} at N = 40,
+80 and 120, fixed lattice stride 2, inflation 1.05, 60 cycles, one seed.
 
 Writes results/EXP-03_<scale>/flow_probe.csv (one row per run, post-burn-in
 RMSE) and metrics_flow_probe.csv (every cycle). About 2-3 h on one core.
@@ -30,16 +31,16 @@ from qgloc.progress import Progress, log
 
 EXP_ID = "EXP-03"
 ARMS = [("enkf-mc", ("fixed", 2), {}), ("enkf-mc", ("fixed", 3), {}), ("enkf-mc", ("fixed", 4), {}),
-        ("enkf-mc-flow", ("flow", None), dict(wake_local=2)),
-        ("enkf-mc-flow", ("flow", None), dict(wake_local=1)),
-        ("enkf-mc-flow", ("flow", None), dict(wake_local=0))]
+        ("enkf-mc-lagged", ("lagged", None), dict(lag_c=2.5)),
+        ("enkf-mc-lagged", ("lagged", None), dict(lag_c=3.0)),
+        ("enkf-mc-lagged", ("lagged", None), dict(lag_c=3.5))]
 
 
 def main():
     a = parse_cli()
     scale = get_scale(a.scale)
-    ctx = ExperimentContext(EXP_ID, "flow-oriented precision at N = 80 and 120", scale)
-    Ns = (80, 120) if scale.name.startswith("paper") else (scale.ensemble_sizes[0],)
+    ctx = ExperimentContext(EXP_ID, "lagged-propagator precision vs uniform, N = 40/80/120", scale)
+    Ns = (40, 80, 120) if scale.name.startswith("paper") else (scale.ensemble_sizes[0],)
     cycles = scale.cycles
     seed = scale.seeds[0]
     rows, metrics = [], []
@@ -48,7 +49,7 @@ def main():
         for filt, arm, over in ARMS:
             bed = make_testbed(scale, obs_network="lattice", ensemble_size=N, obs_stride=2, **over)
             X0, xt0 = bed.build_ensemble(seed)
-            name = f"{filt}_{arm[0]}{arm[1] if arm[1] else ''}" + (f"_local{over['wake_local']}" if over else "")
+            name = f"{filt}_{arm[0]}{arm[1] if arm[1] else ''}" + (f"_c{over['lag_c']}" if over else "")
             out = ctx.path(f"N{N}", name, "run.npz")
             if os.path.exists(out):
                 z = np.load(out, allow_pickle=True); rr = pd.DataFrame(z["metrics"]).to_dict("records")
@@ -63,7 +64,7 @@ def main():
                 metrics.append(dict(tags, **r))
             s = dict(tags, rmse=score(rr, scale.burn_in, "rmse_q"), rmse_last10=float(np.mean([r["rmse_q"] for r in rr[-10:] if not r.get("diverged")] or [np.nan])),
                      spread=score(rr, scale.burn_in, "spread"), diverged=any(r.get("diverged") for r in rr),
-                     pred_mean=score(rr, scale.burn_in, "pred_mean") if filt == "enkf-mc-flow" else np.nan)
+                     pred_mean=score(rr, scale.burn_in, "pred_mean") if filt != "enkf-mc" else np.nan)
             rows.append(s)
             prog.step(f"N{N}/{name}: rmse={s['rmse']:.4f} last10={s['rmse_last10']:.4f}" + (" DIVERGED" if s["diverged"] else ""))
             pd.DataFrame(rows).to_csv(ctx.path("flow_probe.csv"), index=False)

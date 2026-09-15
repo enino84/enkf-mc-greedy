@@ -114,6 +114,9 @@ class QGConfig:
     wake_cap: float = 8.0
     wake_width: float = 1.0
     wake_local: int = 2             # square of this radius added to every wake (2 measured best at N = 40)
+    # EnKF-MC-lagged: window and noise multiple for the lagged cross-correlation
+    lag_window: int = 6
+    lag_c: float = 3.0              # 2 overfits (18 predecessors, spread collapse), 4 underfits; measured at N = 40
 
 
 def build_model(cfg: QGConfig) -> QGModel:

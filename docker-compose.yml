@@ -62,7 +62,7 @@ services:
   shard2: { <<: *common, environment: { <<: *env, SHARD_INDEX: "2", SHARD_COUNT: "${SHARD_COUNT:-4}" }, command: python /work/experiments/exp02_benchmark.py }
   shard3: { <<: *common, environment: { <<: *env, SHARD_INDEX: "3", SHARD_COUNT: "${SHARD_COUNT:-4}" }, command: python /work/experiments/exp02_benchmark.py }
 
-  exp03:                       # EXP-03: flow-oriented precision at N = 80 and 120 (~3 h, one core)
+  exp03:                       # EXP-03: lagged-propagator precision vs uniform, N = 40/80/120 (~4 h, one core)
     <<: *common
     container_name: qgloc-exp03
     command: python /work/experiments/exp03_flow_probe.py
