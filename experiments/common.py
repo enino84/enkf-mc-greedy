@@ -117,11 +117,14 @@ SCALES = {
                    snapshot_every=200.0, cycles=20, burn_in=5, runs=2,
                    radii=(1, 2, 4), rhos=(3, 4), rhos_by_N={40: (3, 4)}, ensemble_sizes=(40,), strides=(2, 3),
                    densities=(0.25,), snapshot_cycles=(0, 10, 19)),
-    # 5 time units between assimilations = 16 RK4 steps (vs 64 at 20): four
-    # times cheaper to propagate and closer to Sakov & Oke's cadence; the
-    # background error grows about x1.2 per cycle instead of x1.9.
-    "paper": Scale(name="paper", obs_freq=5.0),
-    "paper20": Scale(name="paper20"),          # the 20-unit cadence, for contrast
+    # 20 time units between assimilations (64 RK4 steps) with inflation 1.15
+    # is the validated regime. At 5 units the same inflation blows the spread
+    # up (0.37 -> 1.56 in 16 cycles, RMSE > 2), and at 1.05 it converges
+    # slower than the 20-unit run over the same model time -- measured.
+    # First pass: N in {40, 80}, two seeds (~20 h on 4 shards). N = 120 and
+    # the third seed are "paper_full"; finished runs are never repeated.
+    "paper": Scale(name="paper", ensemble_sizes=(40, 80), runs=2),
+    "paper_full": Scale(name="paper_full"),
 }
 
 
@@ -193,7 +196,10 @@ def make_testbed(scale, **over):
 class ExperimentContext:
     def __init__(self, exp_id, description, scale):
         self.exp_id, self.description, self.scale = exp_id, description, scale
-        self.dir = os.path.join(RESULTS_ROOT, f"{exp_id}_{scale.name}")
+        # paper_full writes into the paper directory, so that the runs the
+        # first pass finished are found and skipped.
+        dirname = "paper" if scale.name == "paper_full" else scale.name
+        self.dir = os.path.join(RESULTS_ROOT, f"{exp_id}_{dirname}")
         os.makedirs(self.dir, exist_ok=True)
         self.t0 = time.time()
         banner(f"{exp_id}   [scale={scale.name}]", [description, f"output: {self.dir}"])

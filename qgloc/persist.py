@@ -37,7 +37,7 @@ import os
 import numpy as np
 
 METRIC_KEYS = ("cycle", "diverged", "p_obs", "spread", "t_assign", "t_analysis",
-               "r_mean", "r_max", "b_rmse_q", "b_rmse_psi", "rmse_q", "rmse_psi",
+               "r_mean", "r_max", "b_rmse_q", "b_rmse_psi", "rmse_q", "rmse_psi", "rmse_q_raw", "b_rmse_q_raw",
                "rel_q", "b_rel_q", "rmse", "b_rmse", "J", "frac_not_nearest",
                "frac_abstain", "obs_unused")
 

@@ -271,6 +271,7 @@ class Testbed:
         for k, b in self.blocks.items():
             d = (x[b][m] - x_true[b][m]) / self.spread[k]
             out[f"rmse_{k}"] = float(np.sqrt(np.mean(d ** 2)))
+            out[f"rmse_{k}_raw"] = float(out[f"rmse_{k}"] * self.spread[k])
             ref = np.sqrt(np.mean((x_true[b][m] / self.spread[k]) ** 2))
             out[f"rel_{k}"] = float(out[f"rmse_{k}"] / ref) if ref > 0 else np.nan
         out["rmse"] = out["rmse_q"]

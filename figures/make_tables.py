@@ -189,6 +189,11 @@ def single_cycle_table(scale):
 def findings_md(scale, s, d1):
     L = [f"# FINDINGS-BENCH ({scale})", "",
          "Every number below is read from `results/EXP-01_*/single_cycle.csv` and `results/EXP-02_*/summary.csv`.", ""]
+    if "spread_q_clim" in s.columns:
+        sq = float(s.spread_q_clim.iloc[0]); so = float(s.obs_std_raw.iloc[0])
+        L += [f"Units: RMSE is in units of the climatological standard deviation of q, {sq:.4g} in model units "
+              f"(1.0 = as bad as not assimilating). Observation noise 0.05 = {so:.4g} in model units. "
+              f"`summary.csv` also has `rmse_raw` in model units.", ""]
     for t in sorted(t for t in s.tanda.unique() if t.startswith("N")):
         m = s[s.tanda == t]
         geo = f"lattice spacing {int(m.stride.iloc[0])}" if int(m.stride.iloc[0]) > 0 else f"random networks, {100*float(m.density.iloc[0]):.0f}% observed"

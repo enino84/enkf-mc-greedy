@@ -106,7 +106,9 @@ def main():
         for r in rows:
             metrics.append(dict(tags, **r))
         s = dict(tags, rmse=score(rows, cfg.burn_in, "rmse_q"),
+                 rmse_raw=score(rows, cfg.burn_in, "rmse_q_raw"),
                  b_rmse=score(rows, cfg.burn_in, "b_rmse_q"),
+                 spread_q_clim=float(bed.spread["q"]), obs_std_raw=float(cfg.obs_std * bed.spread["q"]),
                  spread=score(rows, cfg.burn_in, "spread"),
                  r_mean=score(rows, cfg.burn_in, "r_mean"),
                  t_analysis=score(rows, cfg.burn_in, "t_analysis"),

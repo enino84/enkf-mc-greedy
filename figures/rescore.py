@@ -21,7 +21,7 @@ from common_fig import exp_dir, load_metrics
 
 TAGS = ["tanda", "network", "filt", "arm", "kind", "radius", "rho", "seed", "N",
         "alpha", "stride", "density"]
-MEANS = {"rmse": "rmse_q", "b_rmse": "b_rmse_q", "spread": "spread", "r_mean": "r_mean",
+MEANS = {"rmse": "rmse_q", "rmse_raw": "rmse_q_raw", "b_rmse": "b_rmse_q", "spread": "spread", "r_mean": "r_mean",
          "t_analysis": "t_analysis", "t_assign": "t_assign", "J": "J",
          "frac_not_nearest": "frac_not_nearest", "frac_abstain": "frac_abstain",
          "obs_unused": "obs_unused"}
